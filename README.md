@@ -2,7 +2,7 @@
 
 <img src="assets/guac-build-logo.svg" alt="Guac Build avocado mascot" width="220">
 
-<h1>🥑<br>Guac Build (<code>guac</code>)</h1>
+<h1>Guac Build (<code>guac</code>)</h1>
 
 **Guac Build** is a Muse Spark 1.1-powered terminal coding agent. It runs as a
 full-screen TUI that understands your codebase, edits files, executes shell
