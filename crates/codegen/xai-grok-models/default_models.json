@@ -1,18 +1,19 @@
 {
-  "default": "grok-4.5",
-  "web_search": "grok-4.20-multi-agent",
-  "image_description": "grok-4.5",
-  "session_summary": "grok-4.5",
+  "default": "muse-spark-1.1",
+  "web_search": "muse-spark-1.1",
+  "image_description": "muse-spark-1.1",
+  "session_summary": "muse-spark-1.1",
   "models": [
     {
-      "id": "grok-4.5",
-      "model": "grok-4.5",
-      "name": "Grok 4.5",
-      "description": "SpaceXAI's new frontier model",
-      "context_window": 500000,
+      "id": "muse-spark-1.1",
+      "model": "muse-spark-1.1",
+      "name": "Muse Spark 1.1",
+      "description": "Meta's multimodal reasoning model for coding and agentic tasks",
+      "context_window": 1048576,
       "api_backend": "responses",
-      "supports_backend_search": false,
-      "system_prompt_label": "Grok 4.5",
+      "env_key": ["MODEL_API_KEY", "META_API_KEY"],
+      "supports_backend_search": true,
+      "system_prompt_label": "Muse Spark 1.1",
       "show_model_fingerprint": true,
       "supports_reasoning_effort": true,
       "reasoning_effort": "high",
@@ -21,9 +22,14 @@
       "compactions_remaining": 1,
       "reasoning_efforts": [
         {
+          "value": "xhigh",
+          "label": "Extra-high Effort",
+          "description": "Maximum supported reasoning depth for demanding work"
+        },
+        {
           "value": "high",
           "label": "High Effort",
-          "description": "Highest implementation quality with extensive reasoning",
+          "description": "Extensive reasoning for complex implementation work",
           "default": true
         },
         {
@@ -35,6 +41,11 @@
           "value": "low",
           "label": "Low Effort",
           "description": "Quick, fast implementations"
+        },
+        {
+          "value": "minimal",
+          "label": "Minimal Effort",
+          "description": "Lowest latency for straightforward work"
         }
       ]
     }

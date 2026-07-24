@@ -88,7 +88,7 @@ fn resolve_agent_profile_path(path: &std::path::Path) -> std::path::PathBuf {
 /// Print startup information for the serve command.
 fn print_serve_startup_info(bind_addr: SocketAddr, secret: &str) {
     eprintln!();
-    eprintln!("   Grok agent server starting...");
+    eprintln!("   Guac Build agent server starting...");
     eprintln!();
     eprintln!("   Address:  {}:{}", bind_addr.ip(), bind_addr.port());
     eprintln!("   Secret:   {}", secret);
@@ -1044,7 +1044,7 @@ async fn run_agent_command(
     let is_leader = matches!(agent_args.mode, Some(AgentCmd::Leader(_)));
     if !is_stdio && !is_leader {
         eprintln!(
-            "Grok Build (pager) - v{}",
+            "Guac Build - v{}",
             xai_grok_version::display_version_with_commit(
                 env!("VERSION_WITH_COMMIT"),
                 xai_grok_update::channel_label(),
@@ -1621,7 +1621,7 @@ fn install_heap_profile_hooks() {
 }
 fn version_text(channel_label: &str) -> String {
     format!(
-        "grok {}\n",
+        "guac {}\n",
         xai_grok_version::display_version_with_commit(env!("VERSION_WITH_COMMIT"), channel_label,)
     )
 }
@@ -1677,7 +1677,7 @@ fn main() {
     );
     raise_fd_limit();
     if let Err(e) = xai_grok_config::validate_requirements() {
-        eprintln!("Couldn't start Grok: {e}");
+        eprintln!("Couldn't start Guac Build: {e}");
         eprintln!();
         eprintln!(
             "Update Grok to a version the policy allows, or ask your administrator \
@@ -1848,11 +1848,10 @@ async fn async_main(args: PagerArgs) -> Result<()> {
                 xai_grok_shell::inspect::inspect(&cwd, json).await?;
                 return Ok(());
             }
-            Command::Setup { json } => {
-                init_tracing_simple("cli");
-                let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                run_setup_command(json).await;
-                return Ok(());
+            Command::Setup { .. } => {
+                anyhow::bail!(
+                    "Managed xAI deployment setup is not available in Guac Build. Configure Meta Model API in ~/.guac/config.toml."
+                );
             }
             Command::Mcp(mcp_args) => {
                 init_tracing_simple("cli");
@@ -1900,14 +1899,10 @@ async fn async_main(args: PagerArgs) -> Result<()> {
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 return xai_grok_pager::sessions_cmd::run(sessions_args, &agent_config).await;
             }
-            Command::Share(ref share_args) => {
-                init_tracing_simple("cli");
-                let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let config = xai_grok_shell::config::load_effective_config_disk_only()
-                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
-                let agent_config = AgentConfig::new_from_toml_cfg(&config)
-                    .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
-                return xai_grok_pager::share_cmd::run(share_args, &agent_config).await;
+            Command::Share(_) => {
+                anyhow::bail!(
+                    "The upstream Grok session-sharing service is not available in Guac Build."
+                );
             }
             Command::Export(export_args) => {
                 init_tracing_simple("cli");
@@ -1925,43 +1920,19 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             Command::Memory(memory_args) => {
                 return xai_grok_pager::memory_cmd::run(memory_args);
             }
-            Command::Update {
-                check,
-                json,
-                force_reinstall,
-                version,
-                alpha,
-                stable,
-                enterprise,
-            } => {
-                init_tracing_simple("cli");
-                let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let channel_switch = get_channel_switch(alpha, stable, enterprise);
-                return run_update_command(
-                    check,
-                    json,
-                    force_reinstall,
-                    version,
-                    channel_switch,
-                    &update_config,
-                )
-                .await;
+            Command::Update { .. } => {
+                anyhow::bail!(
+                    "Guac Build does not use the upstream xAI updater. Pull and rebuild this repository to update."
+                );
             }
-            Command::Login {
-                legacy: _,
-                oauth,
-                device_auth,
-                devbox,
-            } => {
-                init_tracing_simple("cli");
-                let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let config = xai_grok_shell::config::load_effective_config_disk_only()
-                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
-                let config = AgentConfig::new_from_toml_cfg(&config)
-                    .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
-                xai_grok_shell::auth::run_cli_login(&config, oauth, device_auth, devbox).await?;
-                println!();
-                xai_grok_shell::instrumentation::finalize_and_exit(0);
+            Command::Login { .. } => {
+                println!(
+                    "Guac Build uses a Meta Model API key.\n\n\
+                     1. Create a key at https://ai.developer.meta.com/\n\
+                     2. Export it: export MODEL_API_KEY=\"...\"\n\
+                     3. Run guac"
+                );
+                return Ok(());
             }
             Command::Logout => {
                 init_tracing_simple("cli");
@@ -2162,14 +2133,8 @@ fn build_update_config() -> UpdateConfig {
 /// Central gate for auto-update checks; add new suppression rules here,
 /// not at call sites.
 fn should_check_for_updates(no_auto_update_flag: bool) -> bool {
-    if cfg!(debug_assertions) {
-        return false;
-    }
-    if no_auto_update_flag {
-        return false;
-    }
-    !std::env::var_os("GROK_DISABLE_AUTOUPDATER")
-        .is_some_and(|v| env_flag_enabled(&v.to_string_lossy()))
+    let _ = no_auto_update_flag;
+    false
 }
 /// Gate for the stdio agent's background auto-update: only the direct stdio
 /// agent, from the managed install. Other modes update in `run_agent_command`.
@@ -2331,20 +2296,20 @@ mod tests {
             let mut output = Vec::new();
             write_version(&mut output, label).unwrap();
             let output = String::from_utf8(output).unwrap();
-            assert!(output.starts_with("grok "));
+            assert!(output.starts_with("guac "));
             assert!(output.contains(env!("VERSION_WITH_COMMIT")));
             assert!(output.ends_with(expected_suffix), "{output:?}");
         }
     }
     #[test]
     fn version_flags_and_doctor_are_distinct_early_intents() {
-        let version = PagerArgs::try_parse_from(["grok", "--version"]).unwrap();
+        let version = PagerArgs::try_parse_from(["guac", "--version"]).unwrap();
         assert!(version.version);
         assert!(version.command.is_none());
-        let short = PagerArgs::try_parse_from(["grok", "-v"]).unwrap();
+        let short = PagerArgs::try_parse_from(["guac", "-v"]).unwrap();
         assert!(short.version);
         assert!(short.command.is_none());
-        let subcommand = PagerArgs::try_parse_from(["grok", "version"]).unwrap();
+        let subcommand = PagerArgs::try_parse_from(["guac", "version"]).unwrap();
         assert!(!subcommand.version);
         assert!(matches!(
             subcommand.command,

@@ -301,7 +301,9 @@ impl Default for GrokComConfig {
                 .ok()
                 .map(|v| env_flag_enabled(&v)),
             force_login_team_uuid: None,
-            preferred_method: None,
+            // Guac Build uses Meta Model API keys. Do not fall through to the
+            // upstream Grok OAuth/session path when a key is missing.
+            preferred_method: Some(PreferredAuthMethod::ApiKey),
         }
     }
 }
@@ -425,6 +427,9 @@ mod tests {
         .expect("parse");
         assert_eq!(cfg.preferred_method, Some(PreferredAuthMethod::Oidc));
         let cfg: GrokComConfig = toml::from_str("").expect("parse empty");
-        assert_eq!(cfg.preferred_method, None);
+        assert_eq!(
+            cfg.preferred_method,
+            Some(PreferredAuthMethod::ApiKey)
+        );
     }
 }

@@ -267,10 +267,10 @@ impl acp::Agent for MvpAgent {
                 &crate::util::grok_home::grok_home(),
             )
         {
-            unsafe { std::env::set_var("XAI_API_KEY", &api_key) };
-            tracing::info!("auth: loaded API key from auth.json (xai::api_key scope)");
+            unsafe { std::env::set_var(auth_method::XAI_API_KEY_ENV_VAR, &api_key) };
+            tracing::info!("auth: loaded Meta Model API key from auth.json");
             xai_grok_telemetry::unified_log::info(
-                "auth: loaded API key from auth.json (xai::api_key scope)",
+                "auth: loaded Meta Model API key from auth.json",
                 None,
                 None,
             );

@@ -1,57 +1,57 @@
 <div align="center">
 
-<h1>
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://media.x.ai/v1/website/spacexai-symbol-white-transparent-0c31957f.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://media.x.ai/v1/website/spacexai-symbol-black-transparent-6435cf42.png">
-    <img alt="SpaceXAI logo" src="https://media.x.ai/v1/website/spacexai-symbol-black-transparent-6435cf42.png" width="96">
-  </picture>
-  <br>
-  Grok Build (<code>grok</code>)
-</h1>
+<img src="assets/guac-build-logo.svg" alt="Guac Build avocado mascot" width="220">
 
-**Grok Build** is SpaceXAI's terminal-based AI coding agent. It runs as a
+<h1>🥑<br>Guac Build (<code>guac</code>)</h1>
+
+**Guac Build** is a Muse Spark 1.1-powered terminal coding agent. It runs as a
 full-screen TUI that understands your codebase, edits files, executes shell
 commands, searches the web, and manages long-running tasks — interactively,
 headlessly for scripting/CI, or embedded in editors via the Agent Client
 Protocol (ACP).
 
-[Installing the released binary](#installing-the-released-binary) ·
-[Building from source](#building-from-source) ·
+[Quick start](#quick-start) ·
 [Documentation](#documentation) ·
 [Repository layout](#repository-layout) ·
 [Development](#development) ·
 [Contributing](#contributing) ·
 [License](#license)
 
-![Grok Build TUI](https://media.x.ai/v1/website/universe-tui-screenshot-6f7a0837.png)
+> [!WARNING]
+> **Experimental and currently untested.** Guac Build started as a random idea,
+> has not yet had a successful build or end-to-end run, and should not be
+> treated as production-ready.
 
-**Learn more about Grok Build at [x.ai/cli](https://x.ai/cli)**
+This is an independent fork of
+[`xai-org/grok-build`](https://github.com/xai-org/grok-build). The joke is the
+whole naming chain: Muse Spark reportedly came from Meta's internally
+**Avocado**-codenamed model effort; avocado becomes guacamole; and a coding
+agent *builds* things. Thus: **Guac Build**. The terminal prompt on the mascot's
+pit completes the bit.
 
-This repository contains the Rust source for the `grok` CLI/TUI and its agent
-runtime. It is synced periodically from the SpaceXAI monorepo.
+The fork keeps Grok Build's Rust harness and local tools, replaces the default
+model/provider with Meta's
+[`muse-spark-1.1`](https://ai.developer.meta.com/docs/getting-started/models/), enables
+Meta Model API search grounding, and removes xAI's hosted `x_search` from the
+default agent.
 
-A small `SOURCE_REV` file at the root records the full monorepo commit SHA
-for the version of the code present in this tree.
+The original internal crate names are intentionally retained to keep upstream
+rebases reviewable. Product-facing behavior, the executable, configuration
+home, provider, and default model are Guac Build.
 
 </div>
 
 ---
 
-## Installing the released binary
+## Quick start
 
-Prebuilt binaries are published for macOS, Linux, and Windows:
+Meta Model API is currently available in public preview for US developers.
+Create an API key at [Meta's developer portal](https://ai.developer.meta.com/),
+then export it:
 
 ```sh
-curl -fsSL https://x.ai/cli/install.sh | bash   # macOS / Linux / Git Bash
-irm https://x.ai/cli/install.ps1 | iex          # Windows PowerShell
-grok --version
+export MODEL_API_KEY="..."
 ```
-
-See the [changelog](https://x.ai/build/changelog) for the latest fixes,
-features, and improvements in each release.
-
-## Building from source
 
 Requirements:
 
@@ -73,30 +73,35 @@ Requirements:
   and not currently tested from this tree.
 
 ```sh
-cargo run -p xai-grok-pager-bin              # build + launch the TUI
-cargo build -p xai-grok-pager-bin --release  # release binary: target/release/xai-grok-pager
-cargo check -p xai-grok-pager-bin            # fast validation
+cargo run -p xai-grok-pager-bin
+cargo build -p xai-grok-pager-bin --release
+./target/release/guac --version
 ```
 
-The binary artifact is named `xai-grok-pager`; official installs ship it as
-`grok`. On first launch it opens your browser to authenticate — see the
-[authentication guide](crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md).
+The binary is `guac`. Configuration and session data live under `~/.guac` by
+default; set `GUAC_HOME` to override that location. `GROK_HOME` remains a
+compatibility fallback. See the
+[authentication guide](crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md)
+and the [Meta integration notes](docs/META_MODEL_API.md).
 
 ## Documentation
-
-Full online documentation is available at
-[docs.x.ai/build/overview](https://docs.x.ai/build/overview).
 
 The user guide ships with the pager crate:
 [`crates/codegen/xai-grok-pager/docs/user-guide/`](crates/codegen/xai-grok-pager/docs/user-guide/)
 — getting started, keyboard shortcuts, slash commands, configuration, theming,
 MCP servers, skills, plugins, hooks, headless mode, sandboxing, and more.
 
+Provider references:
+
+- [Meta Model API overview](https://ai.developer.meta.com/docs/getting-started/overview)
+- [Muse Spark 1.1 models reference](https://ai.developer.meta.com/docs/getting-started/models/)
+- [Search grounding](https://ai.developer.meta.com/docs/getting-started/cookbook/search-grounding/)
+
 ## Repository layout
 
 | Path | Contents |
 |------|----------|
-| `crates/codegen/xai-grok-pager-bin` | Composition-root package; builds the `xai-grok-pager` binary |
+| `crates/codegen/xai-grok-pager-bin` | Composition-root package; builds the `guac` binary |
 | `crates/codegen/xai-grok-pager` | The TUI: scrollback, prompt, modals, rendering |
 | `crates/codegen/xai-grok-shell` | Agent runtime + leader/stdio/headless entry points |
 | `crates/codegen/xai-grok-tools` | Tool implementations (terminal, file edit, search, ...) |
@@ -121,8 +126,9 @@ cargo fmt --all               # rustfmt.toml at the repo root
 
 ## Contributing
 
-> [!NOTE]
-> External contributions are not accepted. See [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Issues and pull requests are welcome. The upstream
+[`CONTRIBUTING.md`](CONTRIBUTING.md) is retained for provenance; Guac Build's
+fork policy supersedes its “external contributions are not accepted” note.
 
 ## License
 
@@ -138,3 +144,6 @@ Third-party and vendored code remains under its original licenses. See:
   — crate-local notice for the codex and opencode ports (license texts +
   Apache §4(b) change notice)
 - [`third_party/NOTICE`](third_party/NOTICE) — vendored Mermaid-stack index
+
+Guac Build is not affiliated with or endorsed by Meta or xAI. Meta, Muse,
+Muse Spark, xAI, and Grok are trademarks of their respective owners.

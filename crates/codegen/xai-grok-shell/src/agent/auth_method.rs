@@ -20,24 +20,32 @@ pub(crate) fn new_shared_auth_method_id(initial: Option<acp::AuthMethodId>) -> S
     ))
 }
 
-/// Env var that, when set, advertises `xai.api_key` as a viable auth method.
+/// Primary Meta Model API key environment variable.
 ///
 /// Kept as a constant so test code and the production check stay in sync.
-pub const XAI_API_KEY_ENV_VAR: &str = "XAI_API_KEY";
+pub const XAI_API_KEY_ENV_VAR: &str = "MODEL_API_KEY";
 
-/// Legacy env var name. Checked as a fallback when `XAI_API_KEY` is not set,
-/// so existing deployments that use the old name keep working.
-pub const LEGACY_XAI_API_KEY_ENV_VAR: &str = "GROK_CODE_XAI_API_KEY";
+/// Guac-specific convenience alias.
+pub const LEGACY_XAI_API_KEY_ENV_VAR: &str = "META_API_KEY";
+
+/// Upstream compatibility aliases. Guac does not advertise these names, but
+/// accepting them keeps existing Grok Build installations and tests usable
+/// during migration.
+pub const UPSTREAM_XAI_API_KEY_ENV_VAR: &str = "XAI_API_KEY";
+pub const UPSTREAM_LEGACY_XAI_API_KEY_ENV_VAR: &str = "GROK_CODE_XAI_API_KEY";
 
 /// Read the API key from the environment.
 ///
-/// Checks `XAI_API_KEY` first, then falls back to the legacy
-/// `GROK_CODE_XAI_API_KEY` for backward compatibility.
+/// Meta's official `MODEL_API_KEY` wins, followed by Guac's `META_API_KEY`
+/// alias and the two upstream Grok Build compatibility names.
 pub fn read_xai_api_key_env() -> Result<String, std::env::VarError> {
-    std::env::var(XAI_API_KEY_ENV_VAR).or_else(|_| std::env::var(LEGACY_XAI_API_KEY_ENV_VAR))
+    std::env::var(XAI_API_KEY_ENV_VAR)
+        .or_else(|_| std::env::var(LEGACY_XAI_API_KEY_ENV_VAR))
+        .or_else(|_| std::env::var(UPSTREAM_XAI_API_KEY_ENV_VAR))
+        .or_else(|_| std::env::var(UPSTREAM_LEGACY_XAI_API_KEY_ENV_VAR))
 }
 
-/// Returns `true` if either `XAI_API_KEY` or `GROK_CODE_XAI_API_KEY` is set.
+/// Returns `true` if a Meta or upstream compatibility API key is set.
 pub fn has_xai_api_key_env() -> bool {
     read_xai_api_key_env().is_ok()
 }
@@ -388,9 +396,9 @@ pub fn session_token_auth_gate(
 }
 
 pub const AUTH_ERROR_SESSION_EXPIRED: &str =
-    "Session expired. Run `grok login` to re-authenticate.";
+    "Session authentication is unavailable in Guac Build. Set MODEL_API_KEY.";
 
-pub const AUTH_ERROR_API_KEY: &str = "Authentication failed. Run `grok login`, set XAI_API_KEY, or add api_key to ~/.grok/config.toml.";
+pub const AUTH_ERROR_API_KEY: &str = "Authentication failed. Set MODEL_API_KEY (or META_API_KEY), or add api_key to ~/.guac/config.toml.";
 
 /// Next ACP method id when `cached_token` cannot proceed (missing / expired /
 /// legacy WebLogin), or `None` when fallthrough is forbidden.
@@ -416,18 +424,19 @@ pub fn method_id_after_cached_token_unavailable(
 }
 
 /// Error when `preferred_method=api_key` but no key/BYOK credentials exist.
-pub const PREFERRED_API_KEY_UNAVAILABLE: &str = "preferred_method=api_key but no API key is configured (set XAI_API_KEY or model api_key/env_key in config.toml).";
+pub const PREFERRED_API_KEY_UNAVAILABLE: &str = "No Meta Model API key is configured. Set MODEL_API_KEY (or META_API_KEY), or configure model api_key/env_key in config.toml.";
 
 /// Error when `preferred_method=oidc` but the session path cannot proceed.
 pub const PREFERRED_OIDC_UNAVAILABLE: &str =
     "preferred_method=oidc but no session is available. Run `grok login` to authenticate.";
 
+/// Kept at the upstream ACP wire id so existing clients remain compatible.
 pub const XAI_API_KEY_METHOD_ID: &str = "xai.api_key";
 pub fn xai_api_key_auth_method() -> acp::AuthMethod {
     acp::AuthMethod::Agent(
         acp::AuthMethodAgent::new(
             acp::AuthMethodId::new(XAI_API_KEY_METHOD_ID),
-            "xai.api_key".to_string(),
+            "Meta Model API key".to_string(),
         )
         .description(Some(format!(
             "{XAI_API_KEY_ENV_VAR} or api_key/env_key in config.toml"

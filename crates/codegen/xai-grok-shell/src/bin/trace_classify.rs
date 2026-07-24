@@ -6,8 +6,8 @@
 //!   cargo run --bin trace_classify -- \
 //!       --trace /path/to/trace-<id>-all-turns.json \
 //!       [--output out.jsonl] \
-//!       [--model grok-4.5] \
-//!       [--api-base-url https://api.x.ai/v1] \
+//!       [--model muse-spark-1.1] \
+//!       [--api-base-url https://api.meta.ai/v1] \
 //!       [--api-key <key> | $XAI_API_KEY | <grok-home>/auth.json] \
 //!       [--min-confidence 0.7] \
 //!       [--include-reasoning true] \
@@ -44,11 +44,11 @@ struct Cli {
 
     /// Model the classifier sampler calls. Must be a model the API key
     /// has access to.
-    #[arg(long, default_value = "grok-4.5")]
+    #[arg(long, default_value = "muse-spark-1.1")]
     model: String,
 
     /// Sampler base URL.
-    #[arg(long, default_value = "https://api.x.ai/v1")]
+    #[arg(long, default_value = "https://api.meta.ai/v1")]
     api_base_url: String,
 
     /// API key. Overrides `$XAI_API_KEY` when set; falls back to
@@ -115,7 +115,7 @@ mod tests {
             .expect("parse");
         assert_eq!(cli.trace, PathBuf::from("foo.json"));
         assert_eq!(cli.model, "bar");
-        assert_eq!(cli.api_base_url, "https://api.x.ai/v1");
+        assert_eq!(cli.api_base_url, "https://api.meta.ai/v1");
         assert!(cli.output.is_none());
         assert!(cli.api_key.is_none());
         assert!(cli.min_confidence.is_none());
@@ -186,8 +186,8 @@ mod tests {
                 .map(|v| v.to_string_lossy().into_owned())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(by_id("model"), vec!["grok-4.5"]);
-        assert_eq!(by_id("api_base_url"), vec!["https://api.x.ai/v1"]);
+        assert_eq!(by_id("model"), vec!["muse-spark-1.1"]);
+        assert_eq!(by_id("api_base_url"), vec!["https://api.meta.ai/v1"]);
         assert!(by_id("min_confidence").is_empty(), "no default");
         assert!(by_id("include_reasoning").is_empty(), "no default");
     }

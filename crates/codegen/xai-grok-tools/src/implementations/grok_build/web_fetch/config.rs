@@ -9,7 +9,7 @@ use crate::register_resource;
 // Safety-boundary constants. Not configurable.
 pub const MAX_URL_LENGTH: usize = 2_000;
 pub const MAX_REDIRECTS: usize = 10;
-pub const USER_AGENT_STRING: &str = "Mozilla/5.0 (compatible; grok-agent/1.0; +https://x.ai)";
+pub const USER_AGENT_STRING: &str = "Mozilla/5.0 (compatible; guac-build/0.1; +https://github.com/h1ddenpr0cess20/guac-build)";
 
 /// Runtime-configurable parameters for the `web_fetch` tool.
 ///
@@ -95,11 +95,11 @@ impl WebFetchParams {
 /// Default allowlist for web_fetch tool.
 /// Note: GET-only preapproved domains. Path-scoped entries (e.g. vercel.com/docs) are included as-is.
 pub static DEFAULT_ALLOWED_DOMAINS: &[&str] = &[
-    // xAI
-    "x.ai",
-    "console.x.ai",
-    "docs.x.ai",
-    "api.x.ai",
+    // Meta Model API
+    "ai.meta.com",
+    "developer.meta.com",
+    "ai.developer.meta.com",
+    "api.meta.ai",
     // Programming languages
     "docs.python.org",
     "en.cppreference.com",

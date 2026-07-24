@@ -13,7 +13,8 @@ use ratatui::widgets::{Paragraph, Widget};
 const PRIVACY_BANNER_LEGAL: &str = "Learn more and read Terms and Privacy Policy.";
 
 /// Click target for the legal line links.
-pub(crate) const PRIVACY_BANNER_LEGAL_URL: &str = "https://x.ai/legal";
+pub(crate) const PRIVACY_BANNER_LEGAL_URL: &str =
+    "https://github.com/h1ddenpr0cess20/guac-build#license";
 
 /// Hit rects returned by [`render`] for mouse handling.
 pub(crate) struct PrivacyBannerRects {
@@ -91,10 +92,13 @@ pub(crate) fn render(
         .fg(link_fg)
         .add_modifier(Modifier::UNDERLINED);
     let gray = Style::default().fg(theme.gray);
-    let title = Span::styled("Help improve Grok", Style::default().fg(theme.text_primary));
+    let title = Span::styled(
+        "Help improve Guac Build",
+        Style::default().fg(theme.text_primary),
+    );
     let desc = "Allow your sessions to improve SpaceXAI's models.";
     // Drop trailing spans whole rather than clipping mid-word when narrow.
-    let line1 = if left.width as usize >= "Help improve Grok  ".len() + desc.len() {
+    let line1 = if left.width as usize >= "Help improve Guac Build  ".len() + desc.len() {
         Line::from(vec![
             title,
             Span::raw("  "),

@@ -45,10 +45,13 @@ pub const DEFAULT_AGENT_TYPE: &str = "grok-build-plan";
 pub fn default_agent_type() -> String {
     DEFAULT_AGENT_TYPE.to_owned()
 }
-/// Default base URL for the cli chat proxy.
-pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://cli-chat-proxy.grok.com/v1";
-/// Default base URL for the public xAI API.
-pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
+/// Default base URL for the OpenAI-compatible Meta Model API.
+///
+/// The legacy constant names are retained internally to keep this downstream
+/// fork's patch focused and make future upstream rebases tractable.
+pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://api.meta.ai/v1";
+/// Default inference base URL for Guac Build.
+pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.meta.ai/v1";
 /// Default base URL for the asset server (profile images, etc.).
 pub const ASSET_SERVER_URL_DEFAULT: &str = "https://assets.grok.com";
 /// One or more environment variable names that may hold a model API key.
@@ -666,6 +669,8 @@ pub struct RuntimeResolutionContext<'a> {
 pub(crate) const FIRST_PARTY_CREDENTIAL_ENV_VARS: &[&str] = &[
     crate::agent::auth_method::XAI_API_KEY_ENV_VAR,
     crate::agent::auth_method::LEGACY_XAI_API_KEY_ENV_VAR,
+    crate::agent::auth_method::UPSTREAM_XAI_API_KEY_ENV_VAR,
+    crate::agent::auth_method::UPSTREAM_LEGACY_XAI_API_KEY_ENV_VAR,
     "GROK_AUTH",
     "GROK_AUTH_PATH",
     "GROK_DEPLOYMENT_KEY",
@@ -2402,7 +2407,7 @@ impl Config {
             .requirement(self.requirements.feedback.pinned())
             .config(self.features.feedback)
             .feature_flag(ff)
-            .default(true)
+            .default(false)
             .resolve()
     }
     pub(crate) fn resolve_two_pass_compaction(&self) -> Resolved<bool> {
@@ -3731,6 +3736,7 @@ struct DefaultModelJson {
     temperature: Option<f32>,
     top_p: Option<f32>,
     max_completion_tokens: Option<u32>,
+    env_key: Option<EnvKeys>,
     api_backend: ApiBackend,
     #[serde(default = "default_agent_type")]
     agent_type: String,
@@ -3801,7 +3807,7 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 inference_idle_timeout_secs: m.inference_idle_timeout_secs,
                 max_retries: None,
                 api_key: None,
-                env_key: None,
+                env_key: m.env_key,
                 extra_headers: IndexMap::new(),
                 use_concise: false,
                 hidden: m.hidden,
@@ -6982,7 +6988,7 @@ reasoning_effort = "low"
         assert_eq!(model.api_key, Some("user-custom-api-key".to_string()));
         assert_eq!(model.info.model, dm);
         assert_eq!(
-            model.info.base_url, "https://cli-chat-proxy.grok.com/v1",
+            model.info.base_url, "https://api.meta.ai/v1",
             "base_url should inherit from default, not be stale"
         );
     }
@@ -8395,7 +8401,7 @@ reasoning_effort = "low"
         assert_eq!(model.info.base_url, "https://inference.example.com/v1");
     }
     #[test]
-    fn e2e_default_model_with_session_routes_to_proxy() {
+    fn e2e_default_model_with_session_routes_to_meta() {
         let (_, models) = resolve_models_from_toml("", None);
         let model = models
             .get(crate::models::default_model())
@@ -8403,13 +8409,13 @@ reasoning_effort = "low"
         let sampling = resolve_sampling(model, Some("session-token-123"));
         assert_eq!(sampling.api_key.as_deref(), Some("session-token-123"));
         assert_eq!(
-            sampling.base_url, "https://cli-chat-proxy.grok.com/v1",
-            "session auth should route to cli-chat-proxy, not api.x.ai"
+            sampling.base_url, "https://api.meta.ai/v1",
+            "the Guac default should route to Meta Model API"
         );
     }
     #[test]
     #[serial]
-    fn e2e_default_model_with_external_api_key_routes_to_api_xai() {
+    fn e2e_default_model_with_external_api_key_routes_to_meta() {
         let (_, models) = resolve_models_from_toml("", None);
         let model = models
             .get(crate::models::default_model())
@@ -8418,8 +8424,8 @@ reasoning_effort = "low"
         let sampling = resolve_sampling(model, None);
         assert_eq!(sampling.api_key.as_deref(), Some("xai-external-key"));
         assert_eq!(
-            sampling.base_url, "https://api.x.ai/v1",
-            "external API key should route to api.x.ai via api_base_url"
+            sampling.base_url, "https://api.meta.ai/v1",
+            "external API key should route to Meta Model API"
         );
         unsafe { std::env::remove_var("XAI_API_KEY") };
     }
@@ -8543,7 +8549,7 @@ reasoning_effort = "low"
         assert_eq!(sampling.base_url, "https://inference.example.com/v1");
         let sampling = resolve_sampling(default, Some("session-key"));
         assert_eq!(sampling.api_key.as_deref(), Some("session-key"));
-        assert_eq!(sampling.base_url, "https://cli-chat-proxy.grok.com/v1",);
+        assert_eq!(sampling.base_url, "https://api.meta.ai/v1",);
     }
     #[test]
     fn e2e_enterprise_custom_endpoint_skips_xai_defaults() {
@@ -8846,12 +8852,12 @@ reasoning_effort = "low"
     }
     #[test]
     #[serial]
-    fn resolve_feedback_defaults_to_true_when_unset() {
+    fn resolve_feedback_defaults_to_false_when_unset() {
         unsafe { std::env::remove_var("GROK_FEEDBACK_ENABLED") };
         unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
         let cfg = Config::default();
         let r = cfg.resolve_feedback();
-        assert!(r.value, "feedback should be true by default");
+        assert!(!r.value, "feedback should be false by default");
         assert_eq!(r.source, ConfigSource::Default);
     }
     #[test]

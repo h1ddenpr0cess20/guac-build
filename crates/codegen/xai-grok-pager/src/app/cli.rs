@@ -7,29 +7,29 @@ use std::path::PathBuf;
 /// Top-level commands for the pager binary.
 #[derive(Debug, Clone, Subcommand)]
 pub enum Command {
-    /// Run Grok without the interactive UI
+    /// Run Guac Build without the interactive UI
     Agent(Box<AgentArgs>),
-    /// Show the configuration Grok discovers for this directory
+    /// Show the configuration Guac Build discovers for this directory
     Inspect {
         /// Emit machine-readable JSON output.
         #[arg(long)]
         json: bool,
     },
-    /// Check terminal, clipboard, color, and input support without starting Grok
+    /// Check terminal, clipboard, color, and input support without starting Guac Build
     Doctor(crate::doctor_cmd::DoctorArgs),
     /// Manage running leader processes
     Leader(LeaderMgmtArgs),
     /// Sign out and clear cached credentials
     Logout,
-    /// Sign in to Grok
+    /// Show Meta Model API key setup instructions
     Login {
-        /// Ignored (kept for backwards compatibility). OAuth2 is now the only auth method.
+        /// Ignored compatibility flag.
         #[arg(long, hide = true)]
         legacy: bool,
-        /// Use Grok OAuth via auth.x.ai.
+        /// Ignored compatibility flag.
         #[arg(long = "oauth", alias = "oidc", conflicts_with_all = ["device_auth"])]
         oauth: bool,
-        /// Use device-code authentication for headless/remote environments.
+        /// Ignored compatibility flag.
         #[arg(
             long = "device-auth",
             visible_alias = "device-code",
@@ -78,10 +78,10 @@ clipboard (containers, SSH) and your terminal does not handle OSC 52 itself
 sync with your window size.
 
 Examples:
-  grok wrap docker exec -it my-container bash
-  grok wrap kubectl exec -it my-pod -- bash
+  guac wrap docker exec -it my-container bash
+  guac wrap kubectl exec -it my-pod -- bash
 
-See ~/.grok/README.md for more information.
+See ~/.guac/README.md for more information.
 ")]
     Wrap(WrapArgs),
     /// Export a session transcript as Markdown
@@ -155,7 +155,7 @@ pub struct WrapArgs {
     )]
     pub command: Vec<String>,
 }
-/// Targets a running leader process by PID (used by `grok leader` / `grok workspace`).
+/// Targets a running leader process by PID (used by `guac leader` / `guac workspace`).
 #[derive(Debug, clap::Args, Clone, Default)]
 pub struct LeaderTargetArgs {
     /// Leader process ID from `grok leader list`.
@@ -398,9 +398,9 @@ pub struct LeaderArgs {
 }
 #[derive(Debug, Clone, Parser)]
 #[command(
-    name = "grok",
+    name = "guac",
     version = env!("VERSION_WITH_COMMIT"),
-    about = "Grok Build TUI",
+    about = "Guac Build — Muse Spark 1.1 coding agent",
     disable_version_flag = true,
     next_display_order = None,
     help_template = "\

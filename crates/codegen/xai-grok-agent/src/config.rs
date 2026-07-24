@@ -1462,7 +1462,9 @@ impl AgentDefinition {
             discover_skills: true,
             inherit_skills: true,
             inject_default_tools: true,
-            disallowed_tools: vec![],
+            // Meta's Responses API exposes web_search, but not xAI's
+            // provider-specific x_search hosted tool.
+            disallowed_tools: vec!["x_search".to_owned()],
             tools: vec![],
             effort: None,
             max_turns: None,
@@ -1490,7 +1492,7 @@ impl AgentDefinition {
     pub fn default_grok_build() -> Self {
         Self::base(
             BuiltinAgentName::GrokBuild,
-            "Grok Build agent for software engineering tasks.",
+            "Guac Build agent for software engineering tasks.",
         )
     }
     /// Grok Build Concise agent definition — concise output format for SFT/RL.
