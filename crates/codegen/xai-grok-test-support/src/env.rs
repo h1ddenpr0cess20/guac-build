@@ -66,7 +66,7 @@ fn target_dir() -> PathBuf {
 fn local_grok_binary_path() -> PathBuf {
     target_dir()
         .join("debug")
-        .join(format!("xai-grok-pager{}", std::env::consts::EXE_SUFFIX))
+        .join(format!("guac{}", std::env::consts::EXE_SUFFIX))
 }
 
 fn ensure_local_grok_binary(binary: &Path) {
@@ -77,35 +77,29 @@ fn ensure_local_grok_binary(binary: &Path) {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let mut cmd = Command::new(&cargo);
     cmd.current_dir(workspace_root())
-        .args([
-            "build",
-            "-p",
-            "xai-grok-pager-bin",
-            "--bin",
-            "xai-grok-pager",
-        ])
+        .args(["build", "-p", "xai-grok-pager-bin", "--bin", "guac"])
         .stdin(std::process::Stdio::null())
         .envs(xai_tty_utils::pager_env());
     xai_tty_utils::detach_std_command(&mut cmd);
     let output = cmd
         .output()
-        .unwrap_or_else(|e| panic!("failed to spawn {cargo} to build xai-grok-pager: {e}"));
+        .unwrap_or_else(|e| panic!("failed to spawn {cargo} to build guac: {e}"));
 
     assert!(
         output.status.success(),
-        "failed to build xai-grok-pager for lifecycle tests (exit {:?})\nstdout:\n{}\nstderr:\n{}",
+        "failed to build guac for lifecycle tests (exit {:?})\nstdout:\n{}\nstderr:\n{}",
         output.status.code(),
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
     assert!(
         binary.exists(),
-        "xai-grok-pager build completed but binary missing at {}",
+        "guac build completed but binary missing at {}",
         binary.display()
     );
 }
 
-/// Resolve grok binary: `GROK_BINARY` env (CI) or a locally built `xai-grok-pager` binary.
+/// Resolve guac binary: `GROK_BINARY` env (CI) or a locally built `guac` binary.
 pub fn grok_binary() -> PathBuf {
     if let Ok(path) = std::env::var("GROK_BINARY") {
         let p = PathBuf::from(path);
@@ -113,7 +107,7 @@ pub fn grok_binary() -> PathBuf {
         return p;
     }
 
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_xai-grok-pager") {
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_guac") {
         let p = PathBuf::from(path);
         if p.exists() {
             return p;

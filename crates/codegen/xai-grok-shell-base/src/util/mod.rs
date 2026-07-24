@@ -190,14 +190,21 @@ pub fn kill_process_by_pid(pid: u32) -> std::io::Result<()> {
         terminate.map_err(|e| std::io::Error::other(format!("TerminateProcess({pid}): {e}")))
     }
 }
-/// True if `pid` is a grok process; pairs with [`kill_process_by_pid`] to avoid killing a recycled PID.
+/// True if `pid` is a guac process; pairs with [`kill_process_by_pid`] to avoid killing a recycled PID.
 /// Best-effort on macOS/BSD (liveness-only via `kill -0`), exact on Linux (/proc cmdline) and Windows (image path).
+///
+/// Matches the current `guac` binary name and the legacy `grok` name so leaders
+/// spawned by an older build (or a compatibility `$GROK_HOME` install) are still
+/// recognized after the rebrand.
 pub fn is_grok_process(pid: u32) -> bool {
     #[cfg(target_os = "linux")]
     {
         let cmdline_path = format!("/proc/{pid}/cmdline");
         match std::fs::read(&cmdline_path) {
-            Ok(data) => String::from_utf8_lossy(&data).contains("grok"),
+            Ok(data) => {
+                let cmdline = String::from_utf8_lossy(&data);
+                cmdline.contains("guac") || cmdline.contains("grok")
+            }
             Err(_) => false,
         }
     }
@@ -227,9 +234,8 @@ pub fn is_grok_process(pid: u32) -> bool {
         if result.is_err() {
             return false;
         }
-        String::from_utf16_lossy(&buf[..size as usize])
-            .to_ascii_lowercase()
-            .contains("grok")
+        let image = String::from_utf16_lossy(&buf[..size as usize]).to_ascii_lowercase();
+        image.contains("guac") || image.contains("grok")
     }
     #[cfg(all(not(target_os = "linux"), not(windows)))]
     {

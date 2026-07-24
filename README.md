@@ -23,11 +23,7 @@ Protocol (ACP).
 > treated as production-ready.
 
 This is an independent fork of
-[`xai-org/grok-build`](https://github.com/xai-org/grok-build). The joke is the
-whole naming chain: Muse Spark reportedly came from Meta's internally
-**Avocado**-codenamed model effort; avocado becomes guacamole; and a coding
-agent *builds* things. Thus: **Guac Build**. The terminal prompt on the mascot's
-pit completes the bit.
+[`xai-org/grok-build`](https://github.com/xai-org/grok-build).
 
 The fork keeps Grok Build's Rust harness and local tools, replaces the default
 model/provider with Meta's
