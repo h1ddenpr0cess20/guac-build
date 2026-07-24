@@ -21,7 +21,7 @@ jobs:
     name: rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # rust-toolchain.toml pins the channel + rustfmt/clippy components; the
       # first cargo/rustfmt invocation installs it via rustup.
       - name: Check formatting
@@ -31,7 +31,7 @@ jobs:
     name: build + e2e smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install protoc
         run: |
