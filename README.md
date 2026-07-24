@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/guac-build-logo.svg" alt="Guac Build avocado mascot" width="220">
+
 <h1>🥑<br>Guac Build (<code>guac</code>)</h1>
 
 **Guac Build** is a Muse Spark 1.1-powered terminal coding agent. It runs as a
@@ -15,10 +17,17 @@ Protocol (ACP).
 [Contributing](#contributing) ·
 [License](#license)
 
+> [!WARNING]
+> **Experimental and currently untested.** Guac Build started as a random idea,
+> has not yet had a successful build or end-to-end run, and should not be
+> treated as production-ready.
+
 This is an independent fork of
-[`xai-org/grok-build`](https://github.com/xai-org/grok-build). “Guac” nods to
-Avocado, the internal codename for the model family released publicly by Meta
-as Muse Spark.
+[`xai-org/grok-build`](https://github.com/xai-org/grok-build). The joke is the
+whole naming chain: Muse Spark reportedly came from Meta's internally
+**Avocado**-codenamed model effort; avocado becomes guacamole; and a coding
+agent *builds* things. Thus: **Guac Build**. The terminal prompt on the mascot's
+pit completes the bit.
 
 The fork keeps Grok Build's Rust harness and local tools, replaces the default
 model/provider with Meta's

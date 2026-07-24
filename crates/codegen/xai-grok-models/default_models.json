@@ -1,0 +1,53 @@
+{
+  "default": "muse-spark-1.1",
+  "web_search": "muse-spark-1.1",
+  "image_description": "muse-spark-1.1",
+  "session_summary": "muse-spark-1.1",
+  "models": [
+    {
+      "id": "muse-spark-1.1",
+      "model": "muse-spark-1.1",
+      "name": "Muse Spark 1.1",
+      "description": "Meta's multimodal reasoning model for coding and agentic tasks",
+      "context_window": 1048576,
+      "api_backend": "responses",
+      "env_key": ["MODEL_API_KEY", "META_API_KEY"],
+      "supports_backend_search": true,
+      "system_prompt_label": "Muse Spark 1.1",
+      "show_model_fingerprint": true,
+      "supports_reasoning_effort": true,
+      "reasoning_effort": "high",
+      "auto_compact_threshold_percent": 80,
+      "compaction_at_tokens": true,
+      "compactions_remaining": 1,
+      "reasoning_efforts": [
+        {
+          "value": "xhigh",
+          "label": "Extra-high Effort",
+          "description": "Maximum supported reasoning depth for demanding work"
+        },
+        {
+          "value": "high",
+          "label": "High Effort",
+          "description": "Extensive reasoning for complex implementation work",
+          "default": true
+        },
+        {
+          "value": "medium",
+          "label": "Medium Effort",
+          "description": "Balanced effort with standard implementation and testing"
+        },
+        {
+          "value": "low",
+          "label": "Low Effort",
+          "description": "Quick, fast implementations"
+        },
+        {
+          "value": "minimal",
+          "label": "Minimal Effort",
+          "description": "Lowest latency for straightforward work"
+        }
+      ]
+    }
+  ]
+}
