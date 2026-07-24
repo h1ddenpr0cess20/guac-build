@@ -427,9 +427,6 @@ mod tests {
         .expect("parse");
         assert_eq!(cfg.preferred_method, Some(PreferredAuthMethod::Oidc));
         let cfg: GrokComConfig = toml::from_str("").expect("parse empty");
-        assert_eq!(
-            cfg.preferred_method,
-            Some(PreferredAuthMethod::ApiKey)
-        );
+        assert_eq!(cfg.preferred_method, Some(PreferredAuthMethod::ApiKey));
     }
 }

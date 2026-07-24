@@ -23,7 +23,7 @@
 //! synchronous in-process render could not be killed on timeout. The render
 //! therefore runs **out of process**, in a short-lived child:
 //!
-//! 1. The pager re-execs itself as `xai-grok-pager __mermaid-render` (see
+//! 1. The pager re-execs itself as `guac __mermaid-render` (see
 //!    [`maybe_run_render_subprocess`], intercepted at the very top of `main`
 //!    before any TUI/agent/runtime init). The child reads the source from stdin
 //!    and the theme/width/height from argv, renders source → SVG → PNG, writes

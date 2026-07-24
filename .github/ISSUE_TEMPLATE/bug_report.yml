@@ -1,0 +1,45 @@
+name: Bug report
+description: Something in Guac Build doesn't work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a report. Guac Build is experimental and, per the
+        README, not yet production-ready — but concrete, reproducible reports
+        are still useful.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: Steps to reproduce, expected vs. actual behavior.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `guac --version`.
+      placeholder: "guac 0.2.111 (abc1234)"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows (best-effort / untested)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      description: Relevant terminal output or logs. Redact any API keys.
+      render: shell
+    validations:
+      required: false

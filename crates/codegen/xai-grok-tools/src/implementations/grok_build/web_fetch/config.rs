@@ -9,7 +9,8 @@ use crate::register_resource;
 // Safety-boundary constants. Not configurable.
 pub const MAX_URL_LENGTH: usize = 2_000;
 pub const MAX_REDIRECTS: usize = 10;
-pub const USER_AGENT_STRING: &str = "Mozilla/5.0 (compatible; guac-build/0.1; +https://github.com/h1ddenpr0cess20/guac-build)";
+pub const USER_AGENT_STRING: &str =
+    "Mozilla/5.0 (compatible; guac-build/0.1; +https://github.com/h1ddenpr0cess20/guac-build)";
 
 /// Runtime-configurable parameters for the `web_fetch` tool.
 ///

@@ -17,17 +17,16 @@ Protocol (ACP).
 [Contributing](#contributing) ·
 [License](#license)
 
+[![CI](https://github.com/h1ddenpr0cess20/guac-build/actions/workflows/ci.yml/badge.svg)](https://github.com/h1ddenpr0cess20/guac-build/actions/workflows/ci.yml)
+
 > [!WARNING]
-> **Experimental and currently untested.** Guac Build started as a random idea,
-> has not yet had a successful build or end-to-end run, and should not be
-> treated as production-ready.
+> **Experimental — not production-ready.** Guac Build started as a random idea.
+> The `guac` binary builds and passes an end-to-end smoke test against an
+> in-tree mock inference server, but it has **not** been exercised against the
+> live Meta Model API. Treat it as a work in progress.
 
 This is an independent fork of
-[`xai-org/grok-build`](https://github.com/xai-org/grok-build). The joke is the
-whole naming chain: Muse Spark reportedly came from Meta's internally
-**Avocado**-codenamed model effort; avocado becomes guacamole; and a coding
-agent *builds* things. Thus: **Guac Build**. The terminal prompt on the mascot's
-pit completes the bit.
+[`xai-org/grok-build`](https://github.com/xai-org/grok-build).
 
 The fork keeps Grok Build's Rust harness and local tools, replaces the default
 model/provider with Meta's

@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # Keep GitHub Actions pinned to current major versions.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Cargo dependencies. Grouped and rate-limited to avoid a flood of PRs across
+  # the large crate closure. NOTE: the root Cargo.toml is generated — treat
+  # dependency edits as lockfile updates and prefer per-crate manifests.
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        update-types: ["minor", "patch"]
