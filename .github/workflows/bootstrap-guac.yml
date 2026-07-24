@@ -1,0 +1,42 @@
+name: Bootstrap Guac Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/bootstrap-guac.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap:
+    if: github.repository == 'h1ddenpr0cess20/guac-build'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out bootstrap repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build and fast-forward the fork
+        env:
+          SOURCE_COMMIT: 69f0ba880aa98f55e3ac1dcc570e2f332f825fe2
+        run: |
+          set -euo pipefail
+          BOOTSTRAP_COMMIT=$(git rev-parse HEAD)
+          cp guac-build.patch "$RUNNER_TEMP/guac-build.patch"
+          git remote add upstream https://github.com/xai-org/grok-build.git
+          git fetch --filter=blob:none upstream "$SOURCE_COMMIT"
+          git checkout --detach FETCH_HEAD
+          git apply --index "$RUNNER_TEMP/guac-build.patch"
+          rm -f .github/workflows/bootstrap-guac.yml guac-build.patch
+          git config user.name "Guac Build Bootstrap"
+          git config user.email "actions@users.noreply.github.com"
+          git commit -m "Build Guac with Meta Muse Spark 1.1"
+          GUAC_COMMIT=$(git rev-parse HEAD)
+          GUAC_TREE=$(git rev-parse HEAD^{tree})
+          MERGE_COMMIT=$(printf '%s\n' "Import Guac Build while preserving upstream history" | git commit-tree "$GUAC_TREE" -p "$BOOTSTRAP_COMMIT" -p "$GUAC_COMMIT")
+          git push origin "$MERGE_COMMIT:main"
