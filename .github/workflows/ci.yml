@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # The proto codegen resolves bin/protoc via DotSlash, or falls back to a
+  # protoc on PATH / $PROTOC. CI installs the system compiler and points here.
+  PROTOC: /usr/bin/protoc
+
+jobs:
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # rust-toolchain.toml pins the channel + rustfmt/clippy components; the
+      # first cargo/rustfmt invocation installs it via rustup.
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+  build-test:
+    name: build + e2e smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install protoc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      # Composition-root package; produces the `guac` binary. Full-workspace
+      # builds are slow, so CI targets the binary and the e2e smoke crate.
+      - name: Build guac
+        run: cargo build -p xai-grok-pager-bin --bin guac
+
+      # End-to-end smoke against the in-tree mock inference server: binary
+      # loads, ACP stdio lifecycle completes, and a headless turn round-trips.
+      # GROK_BINARY pins the binary just built so the suite doesn't rebuild it.
+      - name: Built-binary e2e smoke tests
+        run: |
+          GROK_BINARY="$(pwd)/target/debug/guac" \
+            cargo test -p xai-grok-shell --test test_built_binary_e2e -- --ignored \
+              test_version_exits_zero \
+              test_headless_session_in_git_repo \
+              test_stdio_full_session_lifecycle

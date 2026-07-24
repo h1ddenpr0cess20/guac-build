@@ -1,0 +1,60 @@
+name: Release
+
+# Push a semver tag (e.g. `v0.2.111`) to build the `guac` binary and attach it
+# to a GitHub Release. Marked as a prerelease to reflect the project's
+# experimental status.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  PROTOC: /usr/bin/protoc
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install protoc (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Install protoc (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install protobuf
+          echo "PROTOC=$(brew --prefix)/bin/protoc" >> "$GITHUB_ENV"
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release -p xai-grok-pager-bin --bin guac
+
+      - name: Stage artifact
+        run: |
+          mkdir -p dist
+          cp target/release/guac "dist/guac-${{ github.ref_name }}-${{ matrix.target }}"
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          files: dist/*

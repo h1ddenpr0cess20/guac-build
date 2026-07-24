@@ -17,10 +17,13 @@ Protocol (ACP).
 [Contributing](#contributing) ·
 [License](#license)
 
+[![CI](https://github.com/h1ddenpr0cess20/guac-build/actions/workflows/ci.yml/badge.svg)](https://github.com/h1ddenpr0cess20/guac-build/actions/workflows/ci.yml)
+
 > [!WARNING]
-> **Experimental and currently untested.** Guac Build started as a random idea,
-> has not yet had a successful build or end-to-end run, and should not be
-> treated as production-ready.
+> **Experimental — not production-ready.** Guac Build started as a random idea.
+> The `guac` binary builds and passes an end-to-end smoke test against an
+> in-tree mock inference server, but it has **not** been exercised against the
+> live Meta Model API. Treat it as a work in progress.
 
 This is an independent fork of
 [`xai-org/grok-build`](https://github.com/xai-org/grok-build).

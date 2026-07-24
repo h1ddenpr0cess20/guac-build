@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Meta Model API documentation
+    url: https://ai.developer.meta.com/docs/getting-started/overview
+    about: Questions about the Meta Model API / Muse Spark models, not Guac Build itself.
+  - name: Upstream (grok-build)
+    url: https://github.com/xai-org/grok-build
+    about: Issues in the upstream harness that Guac Build forks from.

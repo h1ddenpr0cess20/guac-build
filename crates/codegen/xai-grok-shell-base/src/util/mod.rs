@@ -190,21 +190,24 @@ pub fn kill_process_by_pid(pid: u32) -> std::io::Result<()> {
         terminate.map_err(|e| std::io::Error::other(format!("TerminateProcess({pid}): {e}")))
     }
 }
+/// True if a process's command line / image path identifies one of our own
+/// processes. Matches the current `guac` binary name and the legacy `grok`
+/// name so leaders spawned by an older build (or a compatibility `$GROK_HOME`
+/// install) are still recognized after the rebrand.
+///
+/// Pure and case-sensitive: Linux passes the raw `/proc/<pid>/cmdline`, Windows
+/// passes the already-lowercased image path (both binary names are lowercase).
+fn cmdline_identifies_our_process(text: &str) -> bool {
+    text.contains("guac") || text.contains("grok")
+}
 /// True if `pid` is a guac process; pairs with [`kill_process_by_pid`] to avoid killing a recycled PID.
 /// Best-effort on macOS/BSD (liveness-only via `kill -0`), exact on Linux (/proc cmdline) and Windows (image path).
-///
-/// Matches the current `guac` binary name and the legacy `grok` name so leaders
-/// spawned by an older build (or a compatibility `$GROK_HOME` install) are still
-/// recognized after the rebrand.
 pub fn is_grok_process(pid: u32) -> bool {
     #[cfg(target_os = "linux")]
     {
         let cmdline_path = format!("/proc/{pid}/cmdline");
         match std::fs::read(&cmdline_path) {
-            Ok(data) => {
-                let cmdline = String::from_utf8_lossy(&data);
-                cmdline.contains("guac") || cmdline.contains("grok")
-            }
+            Ok(data) => cmdline_identifies_our_process(&String::from_utf8_lossy(&data)),
             Err(_) => false,
         }
     }
@@ -235,7 +238,7 @@ pub fn is_grok_process(pid: u32) -> bool {
             return false;
         }
         let image = String::from_utf16_lossy(&buf[..size as usize]).to_ascii_lowercase();
-        image.contains("guac") || image.contains("grok")
+        cmdline_identifies_our_process(&image)
     }
     #[cfg(all(not(target_os = "linux"), not(windows)))]
     {
@@ -350,5 +353,26 @@ mod tests {
     fn is_grok_process_self_true_impossible_pid_false() {
         assert!(is_grok_process(std::process::id()));
         assert!(!is_grok_process(u32::MAX));
+    }
+    #[test]
+    fn cmdline_identifies_guac_and_legacy_grok_but_not_others() {
+        // Regression guard for the rebrand: the shipped binary is `guac`, so a
+        // real leader's cmdline/image never contains "grok". Before the fix,
+        // `guac leader kill` matched only "grok" and skipped every live leader
+        // (deleting its lock/socket as "stale"). The self-recognition test above
+        // is masked because the test binary name contains "grok", so guard the
+        // matcher directly.
+        assert!(cmdline_identifies_our_process("/home/u/.guac/bin/guac"));
+        assert!(cmdline_identifies_our_process(
+            "target/debug/guac\0agent\0leader"
+        ));
+        // Legacy name still recognized (older installs / $GROK_HOME compat).
+        assert!(cmdline_identifies_our_process("/home/u/.grok/bin/grok"));
+        // Unrelated processes must not match.
+        assert!(!cmdline_identifies_our_process(
+            "/usr/bin/python3\0script.py"
+        ));
+        assert!(!cmdline_identifies_our_process("/bin/sleep\0300"));
+        assert!(!cmdline_identifies_our_process(""));
     }
 }
