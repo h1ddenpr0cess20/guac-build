@@ -103,6 +103,82 @@ pub fn exceeds_threshold_with_headroom(
             .saturating_sub(headroom.saturating_mul(100))
 }
 
+/// At or below this window size the client treats the model as "small
+/// context" and tightens its own budgets. Sized so that every window a hosted
+/// frontier model reports stays on the untouched path, while locally served
+/// models (LM Studio, Ollama) — which are commonly configured at 4K–32K —
+/// land on the scaled path.
+pub const SMALL_CONTEXT_WINDOW_TOKENS: u64 = 65_536;
+
+/// Upper bound on the free headroom [`compaction_reserve_tokens`] asks for.
+/// Past this, a bigger reserve buys nothing: the threshold percentage is
+/// already the binding constraint.
+pub const MAX_COMPACTION_RESERVE_TOKENS: u64 = 8_192;
+
+/// Tokens to keep free at the moment auto-compaction fires, so the reply that
+/// triggers it — plus the tool result it is reacting to — still fit.
+///
+/// A quarter of the window, capped at [`MAX_COMPACTION_RESERVE_TOKENS`]. The
+/// cap is what keeps large windows on the unscaled path: 8K of 1M is 0.8%, so
+/// [`auto_compact_threshold_for_window`] leaves their configured percentage
+/// alone.
+#[inline]
+pub fn compaction_reserve_tokens(context_window: u64) -> u64 {
+    (context_window / 4).min(MAX_COMPACTION_RESERVE_TOKENS)
+}
+
+/// True when `context_window` is at or below [`SMALL_CONTEXT_WINDOW_TOKENS`].
+///
+/// `0` (an unknown window) is not small — callers treat it as "no information"
+/// and leave their defaults alone rather than clamping to the tightest budget.
+#[inline]
+pub fn is_small_context_window(context_window: u64) -> bool {
+    context_window > 0 && context_window <= SMALL_CONTEXT_WINDOW_TOKENS
+}
+
+/// Auto-compact threshold for `context_window`, never looser than `configured`.
+///
+/// A percentage tuned for a 1M window leaves too few absolute tokens on a small
+/// one: 85% of 8K is 1.2K free, which one tool result overruns before
+/// compaction can run. This lowers the percentage until at least
+/// [`compaction_reserve_tokens`] stay free, and is a no-op above roughly 55K
+/// where the configured percentage is already the tighter of the two.
+///
+/// Returns `configured` unchanged for `context_window == 0`.
+#[inline]
+pub fn auto_compact_threshold_for_window(context_window: u64, configured: u8) -> u8 {
+    if context_window == 0 {
+        return configured;
+    }
+    let reserve = compaction_reserve_tokens(context_window);
+    let by_reserve = context_window.saturating_sub(reserve) * 100 / context_window;
+    configured.min(by_reserve as u8)
+}
+
+/// Floor for [`tool_output_budget_bytes`]. Below this a tool result is too
+/// clipped to act on, so a tiny window gets a disproportionate slice rather
+/// than an unusable one.
+pub const MIN_TOOL_OUTPUT_BUDGET_BYTES: usize = 2_000;
+
+/// Inline tool-result byte cap for `context_window`, never above `default_bytes`.
+///
+/// One `bash` or MCP result is allowed an eighth of the window; on the 20K-byte
+/// default that ceiling only binds below ~40K tokens. Returns `default_bytes`
+/// unchanged for windows that are not [`is_small_context_window`], so hosted
+/// models keep the tuned default.
+#[inline]
+pub fn tool_output_budget_bytes(context_window: u64, default_bytes: usize) -> usize {
+    if !is_small_context_window(context_window) {
+        return default_bytes;
+    }
+    let by_window = usize::try_from(estimate_chars(context_window / 8)).unwrap_or(default_bytes);
+    // `min(default_bytes)` last so the floor can never loosen a cap the host
+    // set deliberately below it.
+    by_window
+        .max(MIN_TOOL_OUTPUT_BUDGET_BYTES)
+        .min(default_bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,6 +281,110 @@ mod tests {
         // Same shape at the other commonly-configured threshold (95%):
         assert!(exceeds_threshold(950, 1000, 95));
         assert!(!exceeds_threshold(949, 1000, 95));
+    }
+
+    #[test]
+    fn compaction_reserve_is_a_quarter_capped() {
+        assert_eq!(compaction_reserve_tokens(0), 0);
+        assert_eq!(compaction_reserve_tokens(4_096), 1_024);
+        assert_eq!(compaction_reserve_tokens(8_192), 2_048);
+        assert_eq!(compaction_reserve_tokens(32_768), 8_192);
+        // Capped past 32K — 1M would otherwise reserve 262K.
+        assert_eq!(
+            compaction_reserve_tokens(1_048_576),
+            MAX_COMPACTION_RESERVE_TOKENS
+        );
+    }
+
+    #[test]
+    fn is_small_context_window_boundary() {
+        // 0 means "unknown", not "smallest possible".
+        assert!(!is_small_context_window(0));
+        assert!(is_small_context_window(4_096));
+        assert!(is_small_context_window(SMALL_CONTEXT_WINDOW_TOKENS));
+        assert!(!is_small_context_window(SMALL_CONTEXT_WINDOW_TOKENS + 1));
+        assert!(!is_small_context_window(1_048_576));
+    }
+
+    /// The scaling must not touch the windows hosted models report — those are
+    /// already tuned at 85%.
+    #[test]
+    fn auto_compact_threshold_is_noop_for_large_windows() {
+        for cw in [65_537_u64, 131_072, 200_000, 256_000, 1_048_576] {
+            assert_eq!(
+                auto_compact_threshold_for_window(cw, 85),
+                85,
+                "cw={cw} should keep the configured threshold"
+            );
+        }
+    }
+
+    #[test]
+    fn auto_compact_threshold_tightens_small_windows() {
+        // Below the cap the reserve is cw/4, so the threshold lands at 75%.
+        assert_eq!(auto_compact_threshold_for_window(4_096, 85), 75);
+        assert_eq!(auto_compact_threshold_for_window(8_192, 85), 75);
+        assert_eq!(auto_compact_threshold_for_window(16_384, 85), 75);
+        assert_eq!(auto_compact_threshold_for_window(32_768, 85), 75);
+        // Between the cap and the no-op point it graduates back up.
+        assert_eq!(auto_compact_threshold_for_window(49_152, 85), 83);
+        assert_eq!(auto_compact_threshold_for_window(65_536, 85), 85);
+    }
+
+    /// Only ever tightens: a host that already asked for a low threshold keeps
+    /// it, and an unknown window changes nothing.
+    #[test]
+    fn auto_compact_threshold_never_loosens() {
+        assert_eq!(auto_compact_threshold_for_window(8_192, 50), 50);
+        assert_eq!(auto_compact_threshold_for_window(1_048_576, 50), 50);
+        assert_eq!(auto_compact_threshold_for_window(0, 85), 85);
+        assert_eq!(auto_compact_threshold_for_window(0, 42), 42);
+    }
+
+    /// The resulting threshold must leave at least the reserve free, which is
+    /// the whole point of the scaling.
+    #[test]
+    fn auto_compact_threshold_leaves_reserve_free() {
+        for cw in [1_024_u64, 4_096, 8_192, 16_384, 32_768, 65_536] {
+            let pct = auto_compact_threshold_for_window(cw, 85);
+            let fires_at = cw * u64::from(pct) / 100;
+            assert!(
+                cw - fires_at >= compaction_reserve_tokens(cw),
+                "cw={cw} pct={pct} leaves {} free, want >= {}",
+                cw - fires_at,
+                compaction_reserve_tokens(cw),
+            );
+        }
+    }
+
+    #[test]
+    fn tool_output_budget_is_noop_for_large_windows() {
+        assert_eq!(tool_output_budget_bytes(0, 20_000), 20_000);
+        assert_eq!(tool_output_budget_bytes(131_072, 20_000), 20_000);
+        assert_eq!(tool_output_budget_bytes(1_048_576, 20_000), 20_000);
+    }
+
+    #[test]
+    fn tool_output_budget_scales_small_windows() {
+        // cw/8 tokens, times BYTES_PER_TOKEN.
+        assert_eq!(tool_output_budget_bytes(32_768, 20_000), 16_384);
+        assert_eq!(tool_output_budget_bytes(16_384, 20_000), 8_192);
+        assert_eq!(tool_output_budget_bytes(8_192, 20_000), 4_096);
+        // Floored so a tiny window still gets a usable result.
+        assert_eq!(
+            tool_output_budget_bytes(2_048, 20_000),
+            MIN_TOOL_OUTPUT_BUDGET_BYTES
+        );
+        // 65_536/8*4 = 32_768, above the default — clamped back down.
+        assert_eq!(tool_output_budget_bytes(65_536, 20_000), 20_000);
+    }
+
+    /// The floor must not raise a cap the host set below it.
+    #[test]
+    fn tool_output_budget_never_exceeds_default() {
+        assert_eq!(tool_output_budget_bytes(4_096, 500), 500);
+        assert_eq!(tool_output_budget_bytes(32_768, 1_000), 1_000);
+        assert_eq!(tool_output_budget_bytes(8_192, 0), 0);
     }
 
     /// Property: with `headroom == 0` the helper agrees with

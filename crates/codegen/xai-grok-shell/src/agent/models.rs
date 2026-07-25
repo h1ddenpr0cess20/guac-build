@@ -412,7 +412,23 @@ impl ModelsManager {
             self.inner
                 .model_switch_watch
                 .send_modify(|generation| *generation += 1);
+            self.sync_context_window_budget();
         }
+    }
+
+    /// Re-clamp the window-sensitive process-wide budgets to the selected
+    /// model. Small local windows (LM Studio, Ollama) cannot afford the
+    /// hosted-scale tool-result cap; see
+    /// [`crate::util::config::set_active_context_window`].
+    fn sync_context_window_budget(&self) {
+        let window = self
+            .inner
+            .models
+            .read()
+            .get(self.current_model_id().0.as_ref())
+            .map(|entry| entry.info.context_window.get())
+            .unwrap_or(0);
+        crate::util::config::set_active_context_window(window);
     }
 
     /// Look up the per-model Layer-3 LazinessDetector config for the
@@ -557,6 +573,9 @@ impl ModelsManager {
 
     fn rebuild(&self, cfg: &config::Config, prefetched: Option<IndexMap<String, ModelEntry>>) {
         *self.inner.models.write() = resolve_model_catalog(cfg, prefetched);
+        // The rebuild can change the selected model's window (a detected local
+        // window, a fetched catalog) without the id changing.
+        self.sync_context_window_budget();
     }
 
     /// Refresh models when the etag changes.

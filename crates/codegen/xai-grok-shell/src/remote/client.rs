@@ -729,7 +729,15 @@ pub(crate) fn fetch_models_blocking(
                     auth.map(|a| a.key.clone())
                         .ok_or(std::env::VarError::NotPresent)
                 })
-                .map_err(|_| {
+                .ok()
+                // A local server (LM Studio, Ollama) does not authenticate, so
+                // requiring a key here would make pointing the models endpoint
+                // at one impossible. Both accept — and ignore — any bearer.
+                .or_else(|| {
+                    crate::agent::local_provider::LocalProviderKind::from_base_url(&source.url)
+                        .map(|kind| kind.placeholder_api_key().to_owned())
+                })
+                .ok_or_else(|| {
                     BackendError::Auth(
                         "No API key for custom models endpoint. Set XAI_API_KEY.".into(),
                     )

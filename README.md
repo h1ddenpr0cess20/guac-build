@@ -83,6 +83,25 @@ compatibility fallback. See the
 [authentication guide](crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md)
 and the [Meta integration notes](docs/META_MODEL_API.md).
 
+### Running against a local model
+
+LM Studio and Ollama work without an API key. Start the server, then point a
+model at the built-in provider in `~/.guac/config.toml`:
+
+```toml
+[model.local]
+model = "google/gemma-4-2b"   # the id the server reports
+model_provider = "lmstudio"   # or "ollama"
+```
+
+```sh
+guac -m local
+```
+
+Guac reads the context window the server is actually serving that model at and
+scales its compaction and tool-output budgets to fit it. See
+[Local Models](crates/codegen/xai-grok-pager/docs/user-guide/11-custom-models.md#local-models).
+
 ## Documentation
 
 The user guide ships with the pager crate:

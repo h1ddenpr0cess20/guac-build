@@ -233,18 +233,11 @@ api_backend = "responses"
 env_key = "OPENAI_API_KEY"
 ```
 
-### Ollama (Local Models)
+### LM Studio and Ollama (Local Models)
 
-Run models locally with [Ollama](https://ollama.ai):
-
-```toml
-[model.ollama-codellama]
-model = "codellama"
-base_url = "http://localhost:11434/v1"
-name = "CodeLlama (Ollama)"
-```
-
-Make sure Ollama is running (`ollama serve`) and the model is pulled (`ollama pull codellama`).
+Both are supported directly — see [Local Models](#local-models) below, which
+covers the built-in providers and the context-window detection that makes small
+local windows workable.
 
 ### Together AI
 
@@ -267,6 +260,107 @@ base_url = "http://localhost:8080/v1"
 name = "Local Llama"
 temperature = 0.8
 ```
+
+---
+
+## Local Models
+
+[LM Studio](https://lmstudio.ai) and [Ollama](https://ollama.com) have built-in
+providers. Name one with `model_provider` and the base URL, API backend, and
+credential are filled in for you:
+
+```toml
+[model.local]
+model = "google/gemma-4-2b"   # the id the server reports
+model_provider = "lmstudio"   # or "ollama"
+```
+
+```toml
+[model.local]
+model = "gemma4:2b"
+model_provider = "ollama"
+```
+
+Start the server first — LM Studio's local server (`lms server start`, default
+port 1234) or `ollama serve` (default port 11434) — and load or pull the model.
+Then select it like any other model: `guac -m local`, or `/model local` in the
+TUI.
+
+Neither server authenticates by default, so no API key is needed. Set
+`LMSTUDIO_API_KEY` or `OLLAMA_API_KEY` if yours sits behind a proxy that does;
+that value replaces the placeholder bearer.
+
+Both providers use the Responses API (`/v1/responses`), which LM Studio
+implements from 0.3.29 and Ollama from v0.13.3. On an older build, pin the model
+to `api_backend = "chat_completions"`.
+
+### Overriding the Defaults
+
+The built-in provider is a set of defaults, not a lock. Declare the block
+yourself to change any part of it — anything you leave out still comes from the
+built-in:
+
+```toml
+[model_providers.ollama]
+base_url = "http://gpu-box:11434/v1"   # a server on another machine
+```
+
+Per-model settings win over the provider, as usual.
+
+### Context-Window Detection
+
+The context window a local model is *served* at is a runtime setting, not a
+property of the model file. LM Studio loads a model at whatever length you chose
+in the UI, and Ollama serves at `num_ctx` — which recent versions pick from
+available VRAM unless you pin it via `OLLAMA_CONTEXT_LENGTH` or a Modelfile. So
+the same model can be 8K on one machine and 128K on another, and neither server
+reports the figure on its OpenAI-compatible `/v1/models`.
+
+Guac asks each server's native API instead — LM Studio's `/api/v0/models`
+(`loaded_context_length`, falling back to `max_context_length` for a model that
+is not loaded), Ollama's `/api/ps`, falling back to `/api/show`.
+
+The detected value becomes the model's `context_window`, which is what
+auto-compaction measures against. Without it a local model would inherit a
+hosted-scale default and overrun an 8K server mid-session.
+
+Set `context_window` in `[model.<name>]` to pin it explicitly; detection then
+leaves that model alone. Detection is best-effort — if the server is down or too
+old to answer, whatever the model already had is kept.
+
+### Small-Window Behavior
+
+Defaults tuned for a million-token window do not transfer to 8K, so a model
+whose window is at or below 64K gets tighter budgets automatically:
+
+| Budget | Adjustment |
+|---|---|
+| Auto-compact threshold | Lowered from 85% so at least a quarter of the window (capped at 8K tokens) stays free — enough for the reply that triggers compaction. Reaches 75% at 32K and below. |
+| Inline tool-result cap | An eighth of the window, or the configured cap — whichever is smaller — so one `bash` or MCP result cannot consume most of the context. |
+| Concise mode | Enabled — a compact system prompt, shorter tool output, and a reduced toolset. |
+
+Each of these only ever tightens. An explicit `[session]
+auto_compact_threshold_percent` or a per-model `use_concise` wins outright.
+`[mcp] max_output_bytes` acts as a ceiling rather than an override: a smaller
+value is honored, a larger one is still clamped to what the window can hold,
+since a result the window cannot fit fails the request either way.
+
+A practical floor: below about 8K tokens the system prompt and tool definitions
+leave too little room to work in, whatever the budgets say. Prefer loading a
+local model at 16K or more when you can afford the memory.
+
+### Pointing the Models Endpoint at a Local Server
+
+To pick models up from the server's catalog rather than declaring each one:
+
+```bash
+export GROK_MODELS_BASE_URL="http://localhost:1234/v1"
+guac
+```
+
+Guac recognizes the local server, sends the placeholder bearer instead of
+requiring `XAI_API_KEY`, and applies the same detection and small-window
+budgets to every model it discovers.
 
 ---
 

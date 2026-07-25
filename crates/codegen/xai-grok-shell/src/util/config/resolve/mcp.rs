@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
 use toml::Value as TomlValue;
 
 /// Resolve `mcp.liveness_watchers` for a session.
@@ -282,7 +284,57 @@ pub const DEFAULT_MAX_MCP_OUTPUT_BYTES: usize = xai_grok_tools::MCP_MAX_OUTPUT_B
 /// this pushes the *fully resolved* value into tools (tools cannot re-read
 /// config/requirements on every use).
 pub fn cache_remote_max_mcp_output_bytes(remote: Option<u64>) {
-    xai_grok_tools::set_mcp_max_output_bytes(resolve_max_mcp_output_bytes(remote));
+    let base = resolve_max_mcp_output_bytes(remote);
+    RESOLVED_MAX_MCP_OUTPUT_BYTES.store(base, Ordering::Relaxed);
+    push_effective_max_mcp_output_bytes(base);
+}
+
+/// The cap resolved from the config tiers, before the context window is taken
+/// into account. `0` = not yet resolved.
+static RESOLVED_MAX_MCP_OUTPUT_BYTES: AtomicUsize = AtomicUsize::new(0);
+
+/// Context window of the model currently selected. `0` = unknown, which
+/// [`xai_token_estimation::tool_output_budget_bytes`] treats as "no
+/// information" and leaves the cap alone.
+static ACTIVE_CONTEXT_WINDOW: AtomicU64 = AtomicU64::new(0);
+
+/// Push `base`, clamped to what the active context window can afford, into the
+/// tools crate.
+fn push_effective_max_mcp_output_bytes(base: usize) {
+    let window = ACTIVE_CONTEXT_WINDOW.load(Ordering::Relaxed);
+    let effective = xai_token_estimation::tool_output_budget_bytes(window, base);
+    if effective != base {
+        tracing::debug!(
+            base,
+            effective,
+            context_window = window,
+            "clamped MCP output cap to the active context window"
+        );
+    }
+    xai_grok_tools::set_mcp_max_output_bytes(effective);
+}
+
+/// Record the selected model's context window and re-clamp the tool-result cap.
+///
+/// A 20K-byte result is ~5K tokens: a rounding error against a 1M window, but
+/// most of an 8K one. Locally served models routinely run at 8K, so the cap has
+/// to follow the window rather than stay at a hosted-scale constant. Call this
+/// whenever the active model changes; `0` clears the clamp.
+pub fn set_active_context_window(context_window: u64) {
+    if ACTIVE_CONTEXT_WINDOW.swap(context_window, Ordering::Relaxed) == context_window {
+        return;
+    }
+    let base = match RESOLVED_MAX_MCP_OUTPUT_BYTES.load(Ordering::Relaxed) {
+        // Nothing has resolved the tiers yet (no remote settings applied);
+        // resolve them now so the clamp has a real base to work from.
+        0 => {
+            let base = resolve_max_mcp_output_bytes(None);
+            RESOLVED_MAX_MCP_OUTPUT_BYTES.store(base, Ordering::Relaxed);
+            base
+        }
+        base => base,
+    };
+    push_effective_max_mcp_output_bytes(base);
 }
 
 /// Extract `[mcp] max_output_bytes` from one TOML root. Positive integers only.

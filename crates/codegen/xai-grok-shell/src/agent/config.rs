@@ -2016,7 +2016,17 @@ impl Config {
             warnings: config_warnings,
         } = super::config_model_override_parse::parse_model_overrides(raw_config);
         let (mut auth_providers, auth_provider_warnings) = parse_auth_providers(raw_config);
-        let (model_providers, mut model_provider_warnings) = parse_model_providers(raw_config);
+        let (mut model_providers, mut model_provider_warnings) = parse_model_providers(raw_config);
+        // Local servers (LM Studio, Ollama) get built-in defaults, so
+        // `model_provider = "ollama"` needs no [model_providers.*] block. Done
+        // before the auth-helper pass below so a preset participates in it like
+        // any hand-written provider.
+        super::local_provider::inject_presets(
+            &mut model_providers,
+            config_models
+                .values()
+                .filter_map(|m| m.model_provider.clone()),
+        );
         for (id, provider) in &model_providers {
             if let Some(auth) = &provider.auth {
                 let synthetic = model_provider_auth_name(id);
@@ -3631,6 +3641,10 @@ pub fn resolve_model_list(
     }
     apply_global_extra_headers(&mut resolved, &cfg.models);
     apply_global_scalar_defaults(&mut resolved, &cfg.models);
+    // Last layer: ask a local server what window it is actually serving, and
+    // scale the budgets that assume a hosted-scale one. Runs after the global
+    // tiers so it sees the merged values it must not loosen.
+    crate::agent::local_provider::apply_local_provider_defaults(&mut resolved, cfg);
     for entry in resolved.values_mut() {
         entry.info.derive_reasoning_effort_fields();
     }
