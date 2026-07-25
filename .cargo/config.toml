@@ -1,3 +1,22 @@
+# Build-time profile tuning.
+#
+# Lives here rather than in the root `Cargo.toml`, which is generated and would
+# lose these on the next regeneration. Config profiles override manifest ones.
+#
+# Debug info is the single largest cost in a dev build of this workspace: it
+# dominates both rustc time and link time, and `target/` had grown to 25 GB.
+# Dependencies get none of it -- you are not stepping through `serde` -- while
+# workspace crates keep line tables, so panics and `RUST_BACKTRACE` still name
+# a file and line. Full variable-inspection debugging of a dependency needs
+# `debug = 2` here temporarily.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# Test and bench profiles inherit `dev`, so the same applies to `cargo test`.
+
 # link-arg
 # https://pyo3.rs/v0.17.1/building_and_distribution.html#macos
 

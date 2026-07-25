@@ -882,7 +882,10 @@ mod tests {
         let (mut resolved, cfg) = fixture(8_192, |_| {});
         resolved["local"].info.auto_compact_threshold_percent = Some(50);
         apply_local_provider_defaults(&mut resolved, &cfg);
-        assert_eq!(resolved["local"].info.auto_compact_threshold_percent, Some(50));
+        assert_eq!(
+            resolved["local"].info.auto_compact_threshold_percent,
+            Some(50)
+        );
     }
 
     #[test]

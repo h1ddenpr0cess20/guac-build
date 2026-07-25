@@ -19,6 +19,25 @@ This project is experimental; versions track the inherited crate version
   (`GUAC_HOME`, with `GROK_HOME` compatibility). Internal `xai-*` crate names
   retained to keep upstream rebases reviewable.
 
+### Changed
+
+- **Direct-to-GCS trace upload removed.** It uploaded straight to a Google Cloud
+  bucket with a service-account key, for xAI's own trace collection — not
+  something this fork can reach. Setting `trace_upload_bucket` to a `gs://` URL
+  now returns an actionable error instead of failing deep in an auth stack.
+  Proxy upload (the default, and the only method reachable without configuring a
+  bucket) and `s3://` upload are unaffected; the AWS SDK stays regardless
+  because `video_gen` needs it to presign zero-data-retention bucket URLs.
+  Drops `gcloud-storage`, `gcloud-auth`, `gcloud-metadata`, and `token-source`,
+  plus a `gcloud-storage` dependency declared in `xai-grok-shell` that no code
+  referenced.
+- **Dev builds no longer emit full debug info.** Dependencies get none and
+  workspace crates get line tables, set in `.cargo/config.toml` (the root
+  `Cargo.toml` is generated and would lose it). Panics and `RUST_BACKTRACE`
+  still name a file and line; stepping through a dependency in a debugger now
+  needs `debug = 2` there temporarily. Debug info dominated both rustc and link
+  time in a workspace this size, and `target/` had reached 25 GB.
+
 ### Fixed
 
 - `guac leader kill` skipped every live leader (and deleted its lock/socket as

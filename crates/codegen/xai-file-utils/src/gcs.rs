@@ -1,8 +1,10 @@
 //! Shared upload utilities for session persistence and agent telemetry.
 //!
-//! This module provides a unified interface for uploading bytes to cloud storage,
-//! supporting direct upload (via service account), proxy upload (via cli-chat-proxy),
-//! and S3-compatible backends.
+//! Uploads go through the cli-chat-proxy (which resolves the destination bucket
+//! from the caller's ACLs) or, when a bucket is configured, straight to S3.
+//!
+//! The direct-to-GCS backend upstream also carried is not built here — see
+//! [`direct_upload_unsupported`].
 
 use std::path::Path;
 use std::sync::Arc;
@@ -95,9 +97,27 @@ pub trait StorageConfig {
     }
 }
 
+/// Error for the direct-to-GCS upload backend, which Guac Build does not ship.
+///
+/// Upstream could upload traces straight to a GCS bucket using a service-account
+/// key, for xAI's own trace collection. Reaching that bucket is not something
+/// this fork can do, and the `gcloud-storage` client it needed pulled in its own
+/// auth stack, so the backend was dropped rather than carried.
+///
+/// Both remaining methods are unaffected: proxy upload (the default, and the
+/// only one reachable without configuring a bucket) and direct S3, which is
+/// still built because `video_gen` needs the same SDK for presigned URLs.
+fn direct_upload_unsupported(backend: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{backend} direct-to-bucket upload is not available in this build. \
+         Unset `trace_upload_bucket` to use proxy upload, or point it at an \
+         `s3://` bucket instead."
+    )
+}
+
 /// Uploads bytes to cloud storage at the specified path.
 /// Returns the full storage URL on success.
-/// Dispatches to direct, proxy, or S3 backend based on config.
+/// Dispatches to the proxy backend; direct GCS/S3 are not built.
 pub async fn upload_bytes<C: StorageConfig>(
     config: &C,
     object_path: &str,
@@ -105,34 +125,7 @@ pub async fn upload_bytes<C: StorageConfig>(
     content_type: &str,
 ) -> anyhow::Result<String> {
     match config.upload_method() {
-        UploadMethod::Direct {
-            service_account_key,
-        } => {
-            // Parse the bucket URL to extract bucket name (required for direct mode)
-            let url = url::Url::parse(config.bucket_url())
-                .with_context(|| format!("Invalid GCS URL: {}", config.bucket_url()))?;
-
-            if url.scheme() != "gs" {
-                anyhow::bail!(
-                    "Invalid GCS URL scheme: expected 'gs', got '{}'",
-                    url.scheme()
-                );
-            }
-
-            let bucket = url
-                .host_str()
-                .context("GCS URL must have a bucket name")?
-                .to_string();
-
-            upload_bytes_direct(
-                &bucket,
-                object_path,
-                content,
-                content_type,
-                service_account_key.as_deref(),
-            )
-            .await
-        }
+        UploadMethod::Direct { .. } => Err(direct_upload_unsupported("GCS")),
         UploadMethod::Proxy {
             proxy_base_url,
             user_token,
@@ -186,9 +179,6 @@ pub async fn upload_bytes<C: StorageConfig>(
 /// This avoids the nginx `proxy-body-size: 4m` limit on the HTTP ingress and
 /// the Cloudflare 100 MB limit, making it safe for arbitrarily large payloads
 /// (e.g. session share data).
-///
-/// In direct mode this is identical to `upload_bytes` (the service
-/// account already talks to storage directly).
 pub async fn upload_bytes_signed<C: StorageConfig>(
     config: &C,
     object_path: &str,
@@ -196,10 +186,7 @@ pub async fn upload_bytes_signed<C: StorageConfig>(
     content_type: &str,
 ) -> anyhow::Result<String> {
     match config.upload_method() {
-        UploadMethod::Direct { .. } => {
-            // Direct mode already bypasses the proxy — reuse the existing path.
-            upload_bytes(config, object_path, content, content_type).await
-        }
+        UploadMethod::Direct { .. } => Err(direct_upload_unsupported("GCS")),
         UploadMethod::Proxy {
             proxy_base_url,
             user_token,
@@ -236,7 +223,6 @@ pub async fn upload_bytes_signed<C: StorageConfig>(
 /// - For Proxy mode with large files (>50 MB), uses signed-URL multipart upload
 ///   so data travels directly to storage, bypassing the proxy's body size limits
 /// - For Proxy mode with small files, uses `StorageClient::upload_file()` (streaming)
-/// - For Direct mode, streams via the gcloud-storage crate
 pub async fn upload_file<C: StorageConfig>(
     config: &C,
     object_path: &str,
@@ -244,31 +230,7 @@ pub async fn upload_file<C: StorageConfig>(
     content_type: &str,
 ) -> anyhow::Result<String> {
     match config.upload_method() {
-        UploadMethod::Direct {
-            service_account_key,
-        } => {
-            let bucket_url = config.bucket_url();
-            let url = url::Url::parse(bucket_url)
-                .with_context(|| format!("Invalid GCS URL: {}", bucket_url))?;
-            if url.scheme() != "gs" {
-                anyhow::bail!(
-                    "Invalid GCS URL scheme: expected 'gs', got '{}'",
-                    url.scheme()
-                );
-            }
-            let bucket = url
-                .host_str()
-                .context("GCS URL must have a bucket name")?
-                .to_string();
-            upload_file_direct(
-                &bucket,
-                object_path,
-                file_path,
-                content_type,
-                service_account_key.as_deref(),
-            )
-            .await
-        }
+        UploadMethod::Direct { .. } => Err(direct_upload_unsupported("GCS")),
         UploadMethod::Proxy {
             proxy_base_url,
             user_token,
@@ -324,31 +286,7 @@ where
     R: tokio::io::AsyncRead + Send + Sync + 'static,
 {
     match config.upload_method() {
-        UploadMethod::Direct {
-            service_account_key,
-        } => {
-            let bucket_url = config.bucket_url();
-            let url = url::Url::parse(bucket_url)
-                .with_context(|| format!("Invalid GCS URL: {}", bucket_url))?;
-            if url.scheme() != "gs" {
-                anyhow::bail!(
-                    "Invalid GCS URL scheme: expected 'gs', got '{}'",
-                    url.scheme()
-                );
-            }
-            let bucket = url
-                .host_str()
-                .context("GCS URL must have a bucket name")?
-                .to_string();
-            upload_stream_direct(
-                &bucket,
-                object_path,
-                reader,
-                content_type,
-                service_account_key.as_deref(),
-            )
-            .await
-        }
+        UploadMethod::Direct { .. } => Err(direct_upload_unsupported("GCS")),
         UploadMethod::Proxy {
             proxy_base_url,
             user_token,
@@ -389,35 +327,6 @@ where
             .await
         }
     }
-}
-
-/// Stream an async reader directly to GCS via the gcloud-storage client.
-async fn upload_stream_direct<R: tokio::io::AsyncRead + Send + Sync + 'static>(
-    bucket: &str,
-    object_path: &str,
-    reader: R,
-    content_type: &str,
-    service_account_key: Option<&str>,
-) -> anyhow::Result<String> {
-    use gcloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
-    use tokio_util::io::ReaderStream;
-
-    let client = build_gcs_client(service_account_key).await?;
-    let stream = ReaderStream::new(reader);
-
-    let mut media = Media::new(object_path.to_string());
-    media.content_type = content_type.to_owned().into();
-    let upload_type = UploadType::Simple(media);
-    let request = UploadObjectRequest {
-        bucket: bucket.to_string(),
-        ..Default::default()
-    };
-    client
-        .upload_streamed_object(&request, stream, &upload_type)
-        .await
-        .with_context(|| format!("Failed to upload to gs://{}/{}", bucket, object_path))?;
-
-    Ok(format!("gs://{}/{}", bucket, object_path))
 }
 
 /// Upload a file through the cli-chat-proxy, choosing multipart vs streaming based on size.
@@ -483,96 +392,6 @@ async fn upload_file_via_proxy(
             .with_context(|| format!("Streaming upload failed for {}", object_path))?;
         Ok(format!("gs://{}/{}", response.bucket, response.path))
     }
-}
-
-/// Build a GCS client with optional service account key, or default ADC.
-async fn build_gcs_client(
-    service_account_key: Option<&str>,
-) -> anyhow::Result<gcloud_storage::client::Client> {
-    use gcloud_storage::client::{Client as GcsClient, ClientConfig as GcsClientConfig};
-
-    let gcs_config = if let Some(key_json) = service_account_key {
-        GcsClientConfig::default()
-            .with_credentials(
-                gcloud_storage::client::google_cloud_auth::credentials::CredentialsFile::new_from_str(key_json)
-                    .await
-                    .context("Failed to parse service account key")?,
-            )
-            .await
-            .context("Failed to configure GCS client with service account")?
-    } else {
-        GcsClientConfig::default()
-            .with_auth()
-            .await
-            .context("Failed to authenticate GCS client")?
-    };
-
-    Ok(GcsClient::new(gcs_config))
-}
-
-/// Upload a file directly to GCS by streaming from disk.
-async fn upload_file_direct(
-    bucket: &str,
-    object_path: &str,
-    file_path: &Path,
-    content_type: &str,
-    service_account_key: Option<&str>,
-) -> anyhow::Result<String> {
-    use gcloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
-    use tokio::fs::File as TokioFile;
-    use tokio_util::io::ReaderStream;
-
-    let client = build_gcs_client(service_account_key).await?;
-
-    let file = TokioFile::open(file_path)
-        .await
-        .with_context(|| format!("Failed to open file: {}", file_path.display()))?;
-    // ReaderStream<TokioFile> yields io::Result<Bytes>; io::Error satisfies
-    // upload_streamed_object's S::Error: Into<Box<dyn Error + Send + Sync>> bound directly.
-    let stream = ReaderStream::new(file);
-
-    let mut media = Media::new(object_path.to_string());
-    media.content_type = content_type.to_owned().into();
-    let upload_type = UploadType::Simple(media);
-    let request = UploadObjectRequest {
-        bucket: bucket.to_string(),
-        ..Default::default()
-    };
-    client
-        .upload_streamed_object(&request, stream, &upload_type)
-        .await
-        .with_context(|| format!("Failed to upload to gs://{}/{}", bucket, object_path))?;
-
-    Ok(format!("gs://{}/{}", bucket, object_path))
-}
-
-/// Uploads bytes directly to GCS using the gcloud-storage client.
-async fn upload_bytes_direct(
-    bucket: &str,
-    object_path: &str,
-    content: &[u8],
-    content_type: &str,
-    service_account_key: Option<&str>,
-) -> anyhow::Result<String> {
-    use gcloud_storage::http::objects::upload::{Media, UploadObjectRequest, UploadType};
-
-    let client = build_gcs_client(service_account_key).await?;
-
-    let mut media = Media::new(object_path.to_string());
-    media.content_type = content_type.to_owned().into();
-    let upload_type = UploadType::Simple(media);
-    let request = UploadObjectRequest {
-        bucket: bucket.to_string(),
-        ..Default::default()
-    };
-
-    client
-        .upload_object(&request, content.to_vec(), &upload_type)
-        .await
-        .with_context(|| format!("Failed to upload to gs://{}/{}", bucket, object_path))?;
-
-    // Return the full GCS URL
-    Ok(format!("gs://{}/{}", bucket, object_path))
 }
 
 /// Uploads bytes via the cli-chat-proxy storage proxy API.
@@ -731,19 +550,30 @@ mod tests {
         );
     }
 
+    /// Direct-to-GCS is not built (see `direct_upload_unsupported`). It must
+    /// fail with an actionable message rather than silently succeeding or
+    /// reaching the network, and it must do so before touching the filesystem —
+    /// note this path is nonexistent and the error is still about the backend.
     #[tokio::test]
-    async fn upload_file_direct_missing_file_returns_error() {
-        // Direct mode tries to authenticate first — bucket URL parse should succeed,
-        // but the file open will fail later. We only care it returns an error, not panics.
+    async fn upload_file_direct_gcs_is_unsupported() {
         let config = direct_config();
-        let result = upload_file(
+        let err = upload_file(
             &config,
             "session/turn_0/test.bin",
             std::path::Path::new("/tmp/nonexistent_upload_queue_test_file"),
             "application/octet-stream",
         )
-        .await;
-        assert!(result.is_err(), "Should error for missing file");
+        .await
+        .expect_err("direct GCS upload must not succeed");
+        let err = err.to_string();
+        assert!(
+            err.contains("not available in this build"),
+            "error should say the backend is absent: {err}"
+        );
+        assert!(
+            err.contains("trace_upload_bucket"),
+            "error should name the setting to change: {err}"
+        );
     }
 
     #[tokio::test]
@@ -769,8 +599,11 @@ mod tests {
         .await;
         assert!(result.is_err());
         assert!(
-            result.unwrap_err().to_string().contains("gs"),
-            "Error should mention expected scheme"
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not available in this build"),
+            "Direct GCS is unbuilt, so the backend error precedes any URL check"
         );
     }
 
