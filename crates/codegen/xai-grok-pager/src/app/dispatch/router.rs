@@ -157,12 +157,6 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
             effects.push(Effect::Quit);
             effects
         }
-        Action::QuitForUpdate => {
-            let mut effects = unregister_all_active_sessions(app);
-            app.quit_for_update = true;
-            effects.push(Effect::Quit);
-            effects
-        }
         Action::ResumeForeignSession => {
             let Some(hint) = app.take_foreign_resume_hint() else {
                 return vec![];

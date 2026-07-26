@@ -1104,13 +1104,6 @@ pub struct AppView {
     pub startup_warnings: Vec<crate::startup::StartupWarning>,
     /// Whether the user authenticated with an API key (shown in the version badge).
     pub is_api_key_auth: bool,
-    /// Latest version string from a background update check. Set when
-    /// a newer version is detected; rendered as a notification on the
-    /// welcome screen.
-    pub pending_update_version: Option<String>,
-    /// When true, the event loop should exit so the user can relaunch
-    /// to pick up the downloaded update.
-    pub quit_for_update: bool,
     /// Generation and state for the one launch-scoped foreign resume detection.
     pub(crate) foreign_resume_launch_generation: u64,
     pub(crate) foreign_resume_launch: Option<crate::app::foreign_sessions::ForeignResumeLaunch>,
@@ -1519,10 +1512,8 @@ impl AppView {
             reconnect_pending: false,
             startup_warnings: Vec::new(),
             is_api_key_auth: false,
-            pending_update_version: None,
             foreign_resume_launch_generation: 0,
             foreign_resume_launch: None,
-            quit_for_update: false,
             relaunch: None,
             has_claude_import: false,
             import_claude_modal: None,
@@ -2447,7 +2438,6 @@ impl AppView {
                     welcome_doc_viewer: &mut self.welcome_doc_viewer,
                     changelog_markdown: &self.changelog_markdown,
                     show_changelog_action: self.welcome_show_changelog_action,
-                    has_pending_update: self.pending_update_version.is_some(),
                     has_foreign_resume,
                     cwd_has_git_ancestor: self.cwd_has_git_ancestor,
                     session_picker_grouped: self.session_picker_grouped,
@@ -3052,8 +3042,7 @@ struct WelcomeInputCtx<'a> {
     /// Whether the welcome menu currently includes a "Changelog" row (above
     /// Quit), so index→action mapping accounts for it.
     show_changelog_action: bool,
-    has_pending_update: bool,
-    /// A recent foreign session is available to resume when no update is pending.
+    /// A recent foreign session is available to resume.
     has_foreign_resume: bool,
     cwd_has_git_ancestor: bool,
     session_picker_grouped: bool,
@@ -3436,9 +3425,6 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             }
             if key!('s', CONTROL).matches(key) {
                 return InputOutcome::Action(Action::FetchSessionList);
-            }
-            if ctx.has_pending_update && key!('u', CONTROL).matches(key) {
-                return InputOutcome::Action(Action::QuitForUpdate);
             }
             if ctx.has_foreign_resume && key!('u', CONTROL).matches(key) {
                 return InputOutcome::Action(Action::ResumeForeignSession);
@@ -4257,7 +4243,6 @@ impl AppView {
                             compact,
                             pending_hint,
                             startup_warnings: &self.startup_warnings,
-                            pending_update_version: self.pending_update_version.as_deref(),
                             foreign_resume_hint: foreign_resume_hint.as_ref(),
                             session_picker_content_results: self
                                 .session_picker_content_results
@@ -5754,10 +5739,8 @@ pub(crate) mod tests {
             welcome_shimmer_frame: 0,
             startup_warnings: Vec::new(),
             is_api_key_auth: false,
-            pending_update_version: None,
             foreign_resume_launch_generation: 0,
             foreign_resume_launch: None,
-            quit_for_update: false,
             relaunch: None,
             has_claude_import: false,
             import_claude_modal: None,
@@ -7235,11 +7218,6 @@ pub(crate) mod tests {
         assert!(matches!(
             app.handle_input(&key),
             InputOutcome::Action(Action::ResumeForeignSession)
-        ));
-        app.pending_update_version = Some("9.9.9".into());
-        assert!(matches!(
-            app.handle_input(&key),
-            InputOutcome::Action(Action::QuitForUpdate)
         ));
     }
     #[test]
