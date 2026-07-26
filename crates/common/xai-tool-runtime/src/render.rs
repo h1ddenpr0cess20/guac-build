@@ -139,7 +139,7 @@ pub struct ToolChatCompletion {
     /// JSON-encoded card attachment (images, render cards, files).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub card_attachment: Option<String>,
-    /// Media generation type: `"image_gen"`, `"video_gen"`, etc.
+    /// Media generation type, as reported by the producing tool.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_gen_type: Option<String>,
     /// Code execution result.

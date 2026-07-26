@@ -1,9 +1,9 @@
 //! Shared upload utilities for session persistence and agent telemetry.
 //!
-//! Uploads go through the cli-chat-proxy (which resolves the destination bucket
-//! from the caller's ACLs) or, when a bucket is configured, straight to S3.
+//! Uploads go through the cli-chat-proxy, which resolves the destination bucket
+//! from the caller's ACLs.
 //!
-//! The direct-to-GCS backend upstream also carried is not built here — see
+//! Neither direct-to-bucket backend upstream carried is built here — see
 //! [`direct_upload_unsupported`].
 
 use std::path::Path;
@@ -97,21 +97,17 @@ pub trait StorageConfig {
     }
 }
 
-/// Error for the direct-to-GCS upload backend, which Guac Build does not ship.
+/// Error for the direct-to-bucket upload backends, which Guac Build does not ship.
 ///
-/// Upstream could upload traces straight to a GCS bucket using a service-account
-/// key, for xAI's own trace collection. Reaching that bucket is not something
-/// this fork can do, and the `gcloud-storage` client it needed pulled in its own
-/// auth stack, so the backend was dropped rather than carried.
-///
-/// Both remaining methods are unaffected: proxy upload (the default, and the
-/// only one reachable without configuring a bucket) and direct S3, which is
-/// still built because `video_gen` needs the same SDK for presigned URLs.
+/// Upstream could upload traces straight to a GCS bucket with a service-account
+/// key, or to S3 with the AWS SDK, both for xAI's own trace collection. Neither
+/// bucket is reachable from this fork, and each client pulled in its own auth
+/// stack, so both backends were dropped rather than carried. Proxy upload is
+/// the only remaining method.
 fn direct_upload_unsupported(backend: &str) -> anyhow::Error {
     anyhow::anyhow!(
         "{backend} direct-to-bucket upload is not available in this build. \
-         Unset `trace_upload_bucket` to use proxy upload, or point it at an \
-         `s3://` bucket instead."
+         Unset `trace_upload_bucket` to use proxy upload."
     )
 }
 
@@ -148,25 +144,6 @@ pub async fn upload_bytes<C: StorageConfig>(
                 config.proxy_credentials(),
                 config.proxy_attribution(),
                 config.proxy_http_client(),
-            )
-            .await
-        }
-        UploadMethod::S3 {
-            bucket,
-            region,
-            credentials_file,
-            credentials_content,
-            endpoint_url,
-        } => {
-            crate::s3::upload_bytes(
-                bucket,
-                object_path,
-                content,
-                content_type,
-                region,
-                credentials_content.as_deref(),
-                credentials_file.as_deref(),
-                endpoint_url.as_deref(),
             )
             .await
         }
@@ -212,7 +189,6 @@ pub async fn upload_bytes_signed<C: StorageConfig>(
             )
             .await
         }
-        UploadMethod::S3 { .. } => upload_bytes(config, object_path, content, content_type).await,
     }
 }
 
@@ -247,25 +223,6 @@ pub async fn upload_file<C: StorageConfig>(
                 config.proxy_credentials(),
                 config.proxy_attribution(),
                 config.proxy_http_client(),
-            )
-            .await
-        }
-        UploadMethod::S3 {
-            bucket,
-            region,
-            credentials_file,
-            credentials_content,
-            endpoint_url,
-        } => {
-            crate::s3::upload_file(
-                bucket,
-                object_path,
-                file_path,
-                content_type,
-                region,
-                credentials_content.as_deref(),
-                credentials_file.as_deref(),
-                endpoint_url.as_deref(),
             )
             .await
         }
@@ -306,25 +263,6 @@ where
                 .await
                 .with_context(|| format!("Streaming upload failed for {}", object_path))?;
             Ok(format!("gs://{}/{}", response.bucket, response.path))
-        }
-        UploadMethod::S3 {
-            bucket,
-            region,
-            credentials_file,
-            credentials_content,
-            endpoint_url,
-        } => {
-            crate::s3::upload_stream(
-                bucket,
-                object_path,
-                reader,
-                content_type,
-                region,
-                credentials_content.as_deref(),
-                credentials_file.as_deref(),
-                endpoint_url.as_deref(),
-            )
-            .await
         }
     }
 }

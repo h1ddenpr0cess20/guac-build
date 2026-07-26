@@ -1883,7 +1883,7 @@ impl ScrollbackVideoRef {
 pub fn extract_video_refs(text: &str) -> Vec<ScrollbackVideoRef> {
     use std::sync::LazyLock;
 
-    // Reuse the markdown image ref pattern — video_gen uses ![prompt](path.mp4).
+    // Reuse the markdown image ref pattern — videos ride as ![prompt](path.mp4).
     static MD_RE: LazyLock<regex::Regex> =
         LazyLock::new(|| regex::Regex::new(MARKDOWN_IMAGE_REF_PATTERN).unwrap());
 

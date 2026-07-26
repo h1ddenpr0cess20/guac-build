@@ -83,7 +83,6 @@ pub enum TraceUploadReason {
     /// No grok.com auth or deployment key.
     NoCredentials,
     /// Direct-to-bucket S3 upload.
-    DirectS3,
     /// Proxy mode via grok.com auth.
     Proxy,
     /// Direct GCS with service account key.
@@ -98,7 +97,6 @@ impl TraceUploadReason {
             Self::ZdrTeam => "zdr_team",
             Self::FeatureOff => "feature_off",
             Self::NoCredentials => "no_credentials",
-            Self::DirectS3 => "direct_s3",
             Self::Proxy => "proxy",
             Self::DirectGcs => "direct_gcs",
             Self::SessionNotFound => "session_not_found",
@@ -108,7 +106,6 @@ impl TraceUploadReason {
     pub fn from_upload_method(method: &Option<xai_file_utils::UploadMethod>) -> Self {
         match method {
             Some(xai_file_utils::UploadMethod::Proxy { .. }) => Self::Proxy,
-            Some(xai_file_utils::UploadMethod::S3 { .. }) => Self::DirectS3,
             Some(xai_file_utils::UploadMethod::Direct { .. }) => Self::DirectGcs,
             None => Self::NoCredentials,
         }
@@ -167,7 +164,6 @@ mod tests {
         assert_eq!(TraceUploadReason::ZdrTeam.as_str(), "zdr_team");
         assert_eq!(TraceUploadReason::FeatureOff.as_str(), "feature_off");
         assert_eq!(TraceUploadReason::NoCredentials.as_str(), "no_credentials");
-        assert_eq!(TraceUploadReason::DirectS3.as_str(), "direct_s3");
         assert_eq!(TraceUploadReason::Proxy.as_str(), "proxy");
         assert_eq!(TraceUploadReason::DirectGcs.as_str(), "direct_gcs");
         assert_eq!(
@@ -198,16 +194,6 @@ mod tests {
                 alpha_test_key: None,
             })),
             TraceUploadReason::Proxy
-        );
-        assert_eq!(
-            TraceUploadReason::from_upload_method(&Some(UploadMethod::S3 {
-                bucket: String::new(),
-                region: String::new(),
-                credentials_file: None,
-                credentials_content: None,
-                endpoint_url: None,
-            })),
-            TraceUploadReason::DirectS3
         );
     }
 }

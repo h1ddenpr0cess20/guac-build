@@ -717,7 +717,6 @@ impl ModelOverrideConfig {
 /// ```toml
 /// [tools]
 /// disable_zdr_incompatible_tools = true
-/// # [tools.zdr_video_output_s3] — see ZdrVideoOutputS3Config
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default)]
@@ -725,17 +724,11 @@ pub struct ToolsConfig {
     /// When `true`, all tools (including `read_file`) filter gitignored
     /// files. When `false` (default), each tool picks its own default.
     pub respect_gitignore: bool,
-    /// Drop tools whose xAI API requires server-side artifact storage
-    /// (currently just `video_gen`). Intended for ZDR-bound teams via
-    /// `~/.grok/managed_config.toml`. Defaults to `false`.
+    /// Drop tools whose backing API requires server-side artifact storage.
+    /// No built-in tool currently needs this, but the flag stays as the
+    /// registration gate for ones that would. Intended for ZDR-bound teams
+    /// via `~/.grok/managed_config.toml`. Defaults to `false`.
     pub disable_zdr_incompatible_tools: bool,
-    /// Optional S3 bucket config for ZDR video output. When present (and
-    /// valid), video tools presign an upload URL and pass it to the API so
-    /// the generated video lands in a team-owned bucket instead of being
-    /// downloaded locally. Only effective when `disable_zdr_incompatible_tools`
-    /// is `true`. Populated from `[tools.zdr_video_output_s3]` in config.
-    pub zdr_video_output_s3:
-        Option<xai_grok_tools::implementations::grok_build::video_gen::ZdrVideoOutputS3Config>,
 }
 impl ToolsConfig {
     /// Resolve the final tools config, in priority order:
@@ -745,9 +738,6 @@ impl ToolsConfig {
     /// 2. `[tools]` block from the merged effective config.
     /// 3. Defaults (both `false`).
     ///
-    /// Fields are read individually so a malformed
-    /// `[tools.zdr_video_output_s3]` cannot wipe `disable_zdr_incompatible_tools`
-    /// (or any other tools flag) via whole-table deserialize failure.
     pub fn resolve(config: &toml::Value) -> Self {
         let tools = config.get("tools");
         let mut result = Self {
@@ -759,29 +749,6 @@ impl ToolsConfig {
                 .and_then(|t| t.get("disable_zdr_incompatible_tools"))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
-            zdr_video_output_s3: tools
-                .and_then(|t| t.get("zdr_video_output_s3"))
-                .and_then(|s3_val| match s3_val
-                    .clone()
-                    .try_into::<
-                        xai_grok_tools::implementations::grok_build::video_gen::ZdrVideoOutputS3Config,
-                    >()
-                {
-                    Ok(cfg) if cfg.is_valid() => Some(cfg),
-                    Ok(_) => {
-                        tracing::warn!(
-                                "tools.zdr_video_output_s3 is present but incomplete; ignoring ZDR video output config"
-                            );
-                        None
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                                error = %e,
-                                "tools.zdr_video_output_s3 failed to parse; ignoring ZDR video output config"
-                            );
-                        None
-                    }
-                }),
         };
         match std::env::var("GROK_RESPECT_GITIGNORE").as_deref() {
             Ok("0") | Ok("false") => {
@@ -1088,9 +1055,6 @@ fn apply_requirements_inner(
     pin_feature!(tool_search);
     pin_feature!(web_fetch);
     pin_feature!(ask_user_question);
-    pin_feature!(image_gen);
-    pin_requirement_only!(image_edit);
-    pin_feature!(video_gen);
     pin_feature!(write_file);
     pin_feature!(voice_mode);
     pin_requirement_only!(remote_fetch);

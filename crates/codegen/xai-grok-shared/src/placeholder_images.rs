@@ -108,7 +108,7 @@ pub fn display_number_from_meta(meta: Option<&agent_client_protocol::Meta>) -> O
 ///
 /// The display number comes from each block's `_meta` (set by the TUI),
 /// falling back to 1-based position for callers that don't record it. The
-/// reference is one `image_edit`'s resolver can read directly: the bare
+/// reference is one an image-consuming tool's resolver can read directly: the bare
 /// durable path (from the `file://` URI) when present, else a
 /// `data:<mime>;base64,<data>` URL.
 pub fn attached_image_references(

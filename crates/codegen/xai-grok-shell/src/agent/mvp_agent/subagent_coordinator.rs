@@ -373,7 +373,6 @@ impl MvpAgent {
                         .resolve_trace_bucket_url()
                         .map(|r| r.value),
                     UploadMethod::Proxy { .. } => Some("proxy-managed".to_string()),
-                    UploadMethod::S3 { bucket, .. } => Some(format!("s3://{bucket}")),
                 };
                 match bucket {
                     Some(url) => (Some(method), Some(url)),
@@ -437,8 +436,6 @@ impl MvpAgent {
             memory_config: self.memory_config.clone(),
             web_search_sampling_config: self.prepare_web_search_sampling_config(),
             web_fetch_config: self.prepare_web_fetch_config(),
-            image_gen_config: self.prepare_image_gen_config(),
-            video_gen_config: self.prepare_video_gen_config(),
             app_builder_deployer_config: self.prepare_app_builder_deployer_config(),
             write_file_enabled: self.cfg.borrow().resolve_write_file().value,
             goal_enabled: self.cfg.borrow().resolve_goal().value,

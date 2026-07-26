@@ -1190,130 +1190,12 @@ impl MvpAgent {
         );
         (id.clone(), new_config)
     }
-    /// Whether the current session is a personal grok.com account on a gated
-    /// tier (free / X Basic). The Imagine tools stay advertised to the model but
-    /// are flagged tier-restricted so they short-circuit at call time with the
-    /// SuperGrok upsell prose (see `ImageGenConfig`/`VideoGenConfig`'s
-    /// `tier_restricted`).
-    ///
-    /// Fails **open** (returns `false`) whenever we can't positively confirm a
-    /// restricted personal tier — no auth yet, BYOK / API-key sessions, team
-    /// accounts, and an unknown/absent tier all pass. The server
-    /// authoritatively zero-limits Imagine for free & X Basic (429), so this
-    /// client gate is a UX optimization (a clean in-chat upsell instead of a
-    /// doomed request), never the security boundary — under-restricting is safe,
-    /// over-restricting would wrongly disable a paid feature.
-    ///
-    /// Mirrors the pager's cosmetic slash-command gate
-    /// ([`crate::tier::is_restricted_tier_name`]); the only difference is the
-    /// absent-tier policy (the pager hides on `None`, we fail open on `None`).
-    fn is_tier_restricted_capability(&self) -> bool {
-        let Some(auth) = self.auth_manager.current() else {
-            return false;
-        };
-        if !auth.is_xai_auth() || auth.team_id.is_some() {
-            return false;
-        }
-        let tier = self
-            .cfg
-            .borrow()
-            .remote_settings
-            .as_ref()
-            .and_then(|rs| rs.subscription_tier_display.clone())
-            .or_else(|| jwt_tier_claim(&auth.key));
-        tier.as_deref().is_some_and(crate::tier::is_restricted_tier_name)
-    }
-    /// Build image generation config.
-    ///
-    /// Both BYOK and session (OAuth) users go direct to `xai_api_base_url`.
-    /// `sampling_config.api_key` carries the OAuth bearer for session users (the
-    /// `api_key_provider` refreshes it per request), so IC authenticates and
-    /// meters Imagine usage per-user.
-    pub(super) fn prepare_image_gen_config(
-        &self,
-    ) -> xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig {
-        use xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig;
-        let sampling_config = self.sampling_config.borrow();
-        let Some(ref api_key) = sampling_config.api_key else {
-            return ImageGenConfig::Disabled;
-        };
-        let tier_restricted = self.is_tier_restricted_capability();
-        let cfg = self.cfg.borrow();
-        let base_url = cfg.endpoints.xai_api_base_url.clone();
-        let version = cfg
-            .client_version
-            .clone()
-            .unwrap_or_else(|| xai_grok_version::VERSION.to_string());
-        let alpha_test_key = cfg.endpoints.alpha_test_key.clone();
-        let mut headers = indexmap::IndexMap::new();
-        headers.insert("user-agent".to_string(), format!("xai-grok-build/{version}"));
-        inject_proxy_headers(
-            &mut headers,
-            cfg.client_version.as_deref(),
-            alpha_test_key.as_deref(),
-            &base_url,
-        );
-        ImageGenConfig::Enabled {
-            api_key: api_key.clone(),
-            base_url,
-            extra_headers: headers,
-            image_gen_enabled: cfg.resolve_image_gen().value,
-            image_edit_enabled: cfg.resolve_image_edit().value,
-            model_override: cfg.resolve_image_gen_model_override(),
-            edit_model_override: cfg.resolve_image_edit_model_override(),
-            tier_restricted,
-        }
-    }
     /// Build deploy-service config. The tool talks directly to the deployer service.
     pub(super) fn prepare_app_builder_deployer_config(
         &self,
     ) -> xai_grok_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig {
         use xai_grok_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig;
         AppBuilderDeployerConfig::Disabled
-    }
-    /// Build video generation config. Video tools call the xAI API directly.
-    pub(super) fn prepare_video_gen_config(
-        &self,
-    ) -> xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig {
-        use xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig;
-        let cfg = self.cfg.borrow();
-        if !cfg.resolve_video_gen().value {
-            return VideoGenConfig::Disabled;
-        }
-        let Some(api_key) = self.sampling_config.borrow().api_key.clone() else {
-            return VideoGenConfig::Disabled;
-        };
-        let tier_restricted = self.is_tier_restricted_capability();
-        let zdr_video_output_s3 = cfg
-            .disable_zdr_incompatible_tools
-            .then(|| cfg.zdr_video_output_s3.clone())
-            .flatten()
-            .filter(|s3| s3.is_valid());
-        if cfg.disable_zdr_incompatible_tools && zdr_video_output_s3.is_none() {
-            tracing::info!("video_gen disabled by tools.disable_zdr_incompatible_tools");
-            return VideoGenConfig::Disabled;
-        }
-        let base_url = cfg.endpoints.xai_api_base_url.clone();
-        let version = cfg
-            .client_version
-            .clone()
-            .unwrap_or_else(|| xai_grok_version::VERSION.to_string());
-        let alpha_test_key = cfg.endpoints.alpha_test_key.clone();
-        let mut headers = indexmap::IndexMap::new();
-        headers.insert("user-agent".to_string(), format!("xai-grok-build/{version}"));
-        inject_proxy_headers(
-            &mut headers,
-            cfg.client_version.as_deref(),
-            alpha_test_key.as_deref(),
-            &base_url,
-        );
-        VideoGenConfig::Enabled {
-            api_key,
-            base_url,
-            extra_headers: headers,
-            zdr_video_output_s3: zdr_video_output_s3.map(Box::new),
-            tier_restricted,
-        }
     }
     pub(super) fn prepare_web_search_sampling_config(&self) -> Option<SamplingConfig> {
         let model_id = self.cfg.borrow().web_search_model.clone();
@@ -2406,9 +2288,6 @@ impl MvpAgent {
                         }
                     }
                 }
-                crate::session::repo_changes::UploadMethod::S3 { bucket, .. } => {
-                    Some(format!("s3://{bucket}"))
-                }
                 crate::session::repo_changes::UploadMethod::Proxy { .. } => None,
             }
         };
@@ -2630,9 +2509,6 @@ impl MvpAgent {
                             return None;
                         }
                     }
-                }
-                crate::session::repo_changes::UploadMethod::S3 { bucket, .. } => {
-                    Some(format!("s3://{bucket}"))
                 }
                 crate::session::repo_changes::UploadMethod::Proxy { .. } => None,
             }
@@ -3343,8 +3219,6 @@ impl MvpAgent {
             .and_then(|entry| entry.info.max_retries);
         let origin_client = self.origin_client_info_from_meta(init.meta.as_ref());
         let web_search_sampling_config = self.prepare_web_search_sampling_config();
-        let image_gen_config = self.prepare_image_gen_config();
-        let video_gen_config = self.prepare_video_gen_config();
         let app_builder_deployer_config = self.prepare_app_builder_deployer_config();
         let web_fetch_config = self.prepare_web_fetch_config();
         let write_file_enabled = self.cfg.borrow().resolve_write_file().value;
@@ -3577,8 +3451,6 @@ impl MvpAgent {
                     model_max_retries,
                     web_search_sampling_config,
                     web_fetch_config,
-                    image_gen_config,
-                    video_gen_config,
                     app_builder_deployer_config,
                     write_file_enabled,
                     goal_enabled,
