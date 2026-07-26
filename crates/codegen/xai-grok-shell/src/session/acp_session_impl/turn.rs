@@ -669,7 +669,7 @@ impl SessionActor {
             .await
             .map(|c| c.model)
             .unwrap_or_default();
-        if self.telemetry_enabled || xai_grok_telemetry::external::is_active() {
+        if self.telemetry_enabled {
             let effective_client_identifier =
                 prompt_client_identifier.or_else(|| self.client_identifier.clone());
             let ev = xai_grok_telemetry::events::PromptSubmitted {

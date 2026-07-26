@@ -1,11 +1,7 @@
-//! Telemetry-engine configuration.
+//! Session-logging configuration.
 //!
-//! Extracted from `xai-grok-shell::agent::config` so the data-collector
-//! engine can construct a [`TelemetryClient`](crate::client::TelemetryClient)
-//! without a build-time dependency on the shell.
-//!
-//! Shell still re-exports these types from their original paths so existing
-//! call sites (and `Config` derive impls) compile unchanged.
+//! Shell re-exports these types from their original paths so existing call
+//! sites (and `Config` derive impls) compile unchanged.
 use serde::{Deserialize, Serialize};
 /// Telemetry mode: `true`/`false` (legacy bool) or `"session_metrics"` (string).
 ///

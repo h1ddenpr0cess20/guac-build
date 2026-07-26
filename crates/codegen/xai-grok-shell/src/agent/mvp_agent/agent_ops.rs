@@ -464,44 +464,6 @@ impl MvpAgent {
         let deployment_key = cfg.endpoints.deployment_key.clone();
         Some((base_url, user_token, alpha_test_key, deployment_key))
     }
-    pub(super) fn ensure_telemetry_client(&self) {
-        crate::auth::credential_provider::sync_external_otel_identity();
-        let cfg = self.cfg.borrow();
-        let mode = cfg.resolve_telemetry_mode().value;
-        if !mode.is_disabled() {
-            let Some(auth) = self
-                .auth_manager
-                .current()
-                .filter(|a| {
-                    a.is_xai_auth() || a.auth_mode == crate::auth::AuthMode::ApiKey
-                }) else {
-                return;
-            };
-            let subscription_tier = resolve_subscription_tier_for_telemetry(
-                cfg
-                    .remote_settings
-                    .as_ref()
-                    .and_then(|rs| rs.subscription_tier_display.clone()),
-                Some(&auth),
-            );
-            let (user_id, team_id) = if auth.is_xai_auth() {
-                (Some(auth.user_id), auth.team_id)
-            } else {
-                (None, auth.team_id)
-            };
-            xai_grok_telemetry::client::init_if_needed(
-                cfg.telemetry.clone(),
-                mode,
-                user_id,
-                team_id,
-                cfg.endpoints.deployment_key.clone(),
-                self.origin_client_info_from_meta(None),
-                xai_grok_version::VERSION.to_owned(),
-                subscription_tier,
-                crate::http::shared_client(),
-            );
-        }
-    }
     /// Build a `FeedbackClient` with resolved feedback URL and credentials.
     pub(crate) fn feedback_client(&self) -> Option<FeedbackClient> {
         let (base_url, user_token, alpha_test_key, deployment_key) = self
@@ -830,14 +792,7 @@ impl MvpAgent {
             return;
         };
         tracing::info!("post-auth settings refreshed");
-        let (
-            telemetry_config,
-            telemetry_mode,
-            grok_user_id,
-            grok_team_id,
-            deployment_key,
-            subscription_tier,
-        ) = {
+        {
             let mut cfg = self.cfg.borrow_mut();
             cfg.remote_settings = Some(settings);
             crate::util::config::sync_campaign_fields(&mut cfg);
@@ -851,40 +806,8 @@ impl MvpAgent {
                 trace_upload = %trace_upload,
                 "post-auth data capture config re-resolved",
             );
-            let grok_user_id = is_xai.then(|| user_id.clone());
-            let grok_team_id = is_xai.then(|| team_id.clone()).flatten();
-            let telemetry_config = cfg.telemetry.clone();
-            let deployment_key = cfg.endpoints.deployment_key.clone();
-            let subscription_tier_display = cfg
-                .remote_settings
-                .as_ref()
-                .and_then(|rs| rs.subscription_tier_display.clone());
-            (
-                telemetry_config,
-                telemetry_mode.value,
-                grok_user_id,
-                grok_team_id,
-                deployment_key,
-                subscription_tier_display,
-            )
-        };
+        }
         self.sync_collection_config_gate();
-        let subscription_tier = resolve_subscription_tier_for_telemetry(
-            subscription_tier,
-            self.auth_manager.current_or_expired().as_ref(),
-        );
-        xai_grok_telemetry::client::init(
-            telemetry_config,
-            telemetry_mode,
-            grok_user_id,
-            grok_team_id,
-            deployment_key,
-            self.origin_client_info_from_meta(None),
-            xai_grok_version::VERSION.to_owned(),
-            subscription_tier,
-            crate::http::shared_client(),
-        );
-        crate::auth::credential_provider::sync_external_otel_identity();
         self.emit_announcements(AnnouncementsPushMode::IfChanged);
         self.reconfigure_heap_profile_monitor();
         if remote_was_absent {
@@ -1635,12 +1558,6 @@ impl MvpAgent {
                 instance.cfg.borrow().grok_com_config.auth_provider_command.clone(),
                 instance.diagnostic_upload_config(),
             );
-        crate::auth::credential_provider::wire_otel_auth_manager(
-            instance.auth_manager.clone(),
-        );
-        if let Some(ref dk) = instance.cfg.borrow().endpoints.deployment_key {
-            crate::auth::credential_provider::wire_otel_deployment_key(dk.clone());
-        }
         instance
     }
     /// Handle `x.ai/internal/evict_sessions` — the leader server tells us a

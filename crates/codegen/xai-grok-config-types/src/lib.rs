@@ -703,7 +703,7 @@ pub struct RemoteSettings {
     /// per-run and never persisted, so a remote "enable" could never reach
     /// init; org-wide enable ships via managed config instead. Applied
     /// in-process (tighten-only) via
-    /// `xai_grok_telemetry::external::apply_remote_policy`.
+    /// the external OTEL remote policy (removed).
     #[serde(default)]
     pub external_otel_disabled: Option<bool>,
     /// Force the external stream's content gates (`OTEL_LOG_USER_PROMPTS`,

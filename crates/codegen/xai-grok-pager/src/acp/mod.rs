@@ -344,7 +344,6 @@ pub async fn connect_via_leader(
     ));
 
     // Leader has no in-process agent; init this process's product telemetry client.
-    xai_grok_shell::agent::init::update_telemetry_config(&agent_config, &auth_manager);
 
     Ok(AcpConnection {
         tx,

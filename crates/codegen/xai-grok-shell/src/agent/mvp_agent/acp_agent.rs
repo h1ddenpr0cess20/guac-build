@@ -613,7 +613,6 @@ impl acp::Agent for MvpAgent {
                 }
                 self.set_auth_method(arguments.method_id.clone());
                 self.sync_process_static_api_key(None);
-                self.ensure_telemetry_client();
                 if crate::agent::chat_modes::process_chat_mode_enabled() {
                     self.chat_modes.warm_in_background();
                 }
@@ -756,7 +755,6 @@ impl acp::Agent for MvpAgent {
                     );
                 }
                 self.set_auth_method(arguments.method_id.clone());
-                self.ensure_telemetry_client();
                 if crate::agent::chat_modes::process_chat_mode_enabled() {
                     self.chat_modes.warm_in_background();
                 }
@@ -1200,7 +1198,7 @@ impl acp::Agent for MvpAgent {
         );
         let bridge_attach = BridgeAttach::NotAttached;
         let product_analytics = self.product_analytics_enabled();
-        if product_analytics || xai_grok_telemetry::external::is_active() {
+        if product_analytics {
             let sid = session_id.0.to_string();
             let ci = client_identifier.clone();
             let cv = self.client_version();

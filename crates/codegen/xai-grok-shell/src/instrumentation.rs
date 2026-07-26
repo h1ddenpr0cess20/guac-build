@@ -35,7 +35,6 @@ pub fn finalize_and_exit(code: i32) -> ! {
         "Exiting process"
     );
     let _ = finalize();
-    xai_grok_telemetry::otel_layer::shutdown_otel();
     // Flush the --debug firehose; this exits via process::exit, bypassing main's flush.
     xai_grok_telemetry::debug_log::flush();
     std::process::exit(code);

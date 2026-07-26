@@ -3,7 +3,7 @@ license = "Apache-2.0"
 name = "xai-grok-telemetry"
 version = "0.1.0"
 edition.workspace = true
-description = "Telemetry engine: product events + Mixpanel emission + Sentry error reporting for Grok Build sessions"
+description = "Local session logging for Guac Build: on-disk structured logs and tracing layers"
 authors = ["xAI"]
 
 [features]
@@ -29,13 +29,10 @@ chrono = { workspace = true }
 git2 = { version = "0.20", default-features = false, features = [
     "vendored-libgit2",
 ] }
-reqwest = { workspace = true }
 url = { workspace = true }
 xai-grok-env = { workspace = true }
 xai-grok-secrets = { workspace = true }
-xai-mixpanel = { workspace = true }
 xai-grok-config = { workspace = true }
-xai-grok-sampler = { workspace = true }
 xai-token-estimation = { workspace = true }
 dirs = { workspace = true }
 # Single cross-edge: `events::ToolCallCompleted.outcome` reuses
@@ -52,30 +49,8 @@ obfstr = { workspace = true, optional = true }
 mid = "4.0.0"
 tokio = { workspace = true, features = ["macros", "sync", "rt"] }
 parking_lot = { workspace = true }
-xai-grok-auth = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true, features = [
-    "experimental_logs_batch_log_processor_with_async_runtime",
-    "experimental_metrics_periodicreader_with_async_runtime",
-    "rt-tokio-current-thread",
-] }
-opentelemetry-otlp = { workspace = true }
-opentelemetry-http = { workspace = true }
-http = { workspace = true }
-bytes = { workspace = true }
-async-trait = { workspace = true }
-futures-executor = "0.3"
-tokio-stream = { workspace = true }
-tracing-opentelemetry = { workspace = true }
 
 [dev-dependencies]
-tonic = { workspace = true, features = ["transport"] }
-# In-memory log/metric exporters for the external-stream wire-shape tests.
-opentelemetry_sdk = { workspace = true, features = ["testing"] }
-# In-process OTLP collector fixture (tests/external_otlp.rs).
-axum = { workspace = true }
-opentelemetry-proto = { workspace = true }
-prost = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 # Sets a symlink's own mtime (std's `set_modified` follows links) for prune tests.
 filetime = { workspace = true }
