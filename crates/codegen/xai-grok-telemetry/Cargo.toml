@@ -38,16 +38,6 @@ xai-grok-config = { workspace = true }
 xai-grok-sampler = { workspace = true }
 xai-token-estimation = { workspace = true }
 dirs = { workspace = true }
-sentry = { version = "0.42.0", default-features = false, features = [
-    "panic",
-    "anyhow",
-    "tracing",
-    "backtrace",
-    "contexts",
-    "reqwest",
-    "rustls",
-    "debug-images",
-] }
 # Single cross-edge: `events::ToolCallCompleted.outcome` reuses
 # `xai_file_utils::events::types::ToolOutcome` so the local event log and
 # the product telemetry event share the same enum surface. Semantically this enum

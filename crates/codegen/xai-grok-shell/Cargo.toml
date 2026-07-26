@@ -6,13 +6,11 @@ edition.workspace = true
 
 [features]
 default = []
-unstable = []
 dhat-heap = ["dep:dhat"]
 default-bazel = []
 
 [dependencies]
 dunce = { workspace = true }
-tonic-prost = { workspace = true, optional = true }
 agent-client-protocol = { workspace = true }
 anyhow = { workspace = true }
 xai-grok-announcements = { workspace = true }
@@ -115,8 +113,6 @@ shlex = { workspace = true }
 strum = { workspace = true }
 xai-fast-worktree = { path = "../xai-fast-worktree", features = ["metadata"] }
 
-tonic = { workspace = true, optional = true }
-prost = { workspace = true, optional = true }
 xai-grok-paths = { path = "../xai-grok-paths" }
 xai-grok-shell-base = { workspace = true }
 xai-grok-shell-session-support = { workspace = true }

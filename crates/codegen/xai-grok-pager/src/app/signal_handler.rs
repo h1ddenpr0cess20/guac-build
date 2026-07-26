@@ -242,9 +242,8 @@ fn flush_telemetry_and_exit(exit_code: i32) -> ! {
     // runs on the force/second-signal and agent-mode paths that skip the
     // graceful quit; the graceful path reaps them in `app::run`'s teardown.
     xai_tty_utils::global_process_scope().kill_all();
-    // Restore fd 2 so Sentry/OTEL flushes reach the terminal.
+    // Restore fd 2 so OTEL flushes reach the terminal.
     xai_tty_utils::restore_native_stderr();
-    xai_grok_telemetry::sentry::flush_on_shutdown();
     xai_grok_telemetry::otel_layer::shutdown_otel();
     // Flush the --debug firehose on TUI signal exit (this path bypasses main's flush).
     xai_grok_telemetry::debug_log::flush();

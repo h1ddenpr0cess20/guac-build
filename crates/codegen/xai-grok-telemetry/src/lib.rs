@@ -25,7 +25,6 @@ pub(crate) mod otlp_http;
 pub mod prompt_timing;
 pub(crate) mod redact_common;
 pub mod sampling_log;
-pub mod sentry;
 pub mod session_ctx;
 pub mod session_metrics;
 pub mod unified_log;
