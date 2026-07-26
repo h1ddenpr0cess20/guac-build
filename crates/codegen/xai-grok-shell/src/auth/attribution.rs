@@ -123,7 +123,7 @@ impl ShellAttribution {
     /// Tool-side counterpart of [`Self::new`]: returns
     /// `Arc<dyn xai_grok_tools::Auth401AttributionCallback>` for the
     /// `with_attribution_callback(...)` builder on each tool HTTP
-    /// client (`WebSearchClient`).
+    /// client (`ImageGenClient`, `VideoGenClient`, `WebSearchClient`).
     /// The two callbacks share the same underlying impl and emit the
     /// same `auth_401_attribution` event format -- only the trait
     /// signature differs (`SamplingConsumer` vs. `ToolConsumer`).
@@ -161,10 +161,10 @@ impl Auth401AttributionCallback for ShellAttribution {
     }
 }
 
-/// Tool-side hook: each tool client (web_search) in `xai-grok-tools`
-/// emits a 401 attribution event through this trait when its HTTP
-/// request returns UNAUTHORIZED. Same shape as the sampler-side impl
-/// above; routes to the same pair of sinks.
+/// Tool-side hook: each tool client (image_gen, video_gen, web_search)
+/// in `xai-grok-tools` emits a 401 attribution event through this
+/// trait when its HTTP request returns UNAUTHORIZED. Same shape as
+/// the sampler-side impl above; routes to the same pair of sinks.
 impl ToolAuth401AttributionCallback for ShellAttribution {
     fn record_401(&self, consumer: ToolConsumer, sent_bearer_prefix: Option<&str>) {
         let (kind, op) = match consumer {

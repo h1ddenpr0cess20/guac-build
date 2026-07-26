@@ -13208,6 +13208,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "xai-grok-env",
  "xai-tty-utils",
 ]
 

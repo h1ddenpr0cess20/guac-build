@@ -724,10 +724,9 @@ pub struct ToolsConfig {
     /// When `true`, all tools (including `read_file`) filter gitignored
     /// files. When `false` (default), each tool picks its own default.
     pub respect_gitignore: bool,
-    /// Drop tools whose backing API requires server-side artifact storage.
-    /// No built-in tool currently needs this, but the flag stays as the
-    /// registration gate for ones that would. Intended for ZDR-bound teams
-    /// via `~/.grok/managed_config.toml`. Defaults to `false`.
+    /// Drop tools that require server-side artifact storage (currently just
+    /// `video_gen`). Intended for ZDR-bound teams via
+    /// `~/.grok/managed_config.toml`. Defaults to `false`.
     pub disable_zdr_incompatible_tools: bool,
 }
 impl ToolsConfig {
@@ -738,6 +737,9 @@ impl ToolsConfig {
     /// 2. `[tools]` block from the merged effective config.
     /// 3. Defaults (both `false`).
     ///
+    /// Fields are read individually so a malformed
+    /// `[tools.zdr_video_output_s3]` cannot wipe `disable_zdr_incompatible_tools`
+    /// (or any other tools flag) via whole-table deserialize failure.
     pub fn resolve(config: &toml::Value) -> Self {
         let tools = config.get("tools");
         let mut result = Self {
@@ -1055,6 +1057,9 @@ fn apply_requirements_inner(
     pin_feature!(tool_search);
     pin_feature!(web_fetch);
     pin_feature!(ask_user_question);
+    pin_feature!(image_gen);
+    pin_requirement_only!(image_edit);
+    pin_feature!(video_gen);
     pin_feature!(write_file);
     pin_feature!(voice_mode);
     pin_requirement_only!(remote_fetch);

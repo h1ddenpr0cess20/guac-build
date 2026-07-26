@@ -55,6 +55,55 @@ impl From<serde_json::Value> for DynamicOutput {
         Self { value }
     }
 }
+/// Typed saved path for the media tools (`image_gen` / `video_gen` /
+/// `image_edit`), so consumers read it directly instead of scraping the prose.
+/// A struct (not a bare `PathBuf`) is required: `ToolOutput` is internally
+/// tagged and only accepts map payloads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MediaGenOutput {
+    /// Absolute path to the saved media file.
+    pub path: PathBuf,
+    /// Basename of the saved media file (for example, `8.jpg`).
+    #[serde(default)]
+    pub filename: String,
+    /// Session-relative media directory name (for example, `images` or `videos`).
+    #[serde(default)]
+    pub session_folder: String,
+}
+impl MediaGenOutput {
+    pub fn new(path: PathBuf) -> Self {
+        let filename = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let session_folder = path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Self {
+            path,
+            filename,
+            session_folder,
+        }
+    }
+    /// Model-facing prose. `action` is the variant's lead-in
+    /// ("Image generated" / "Video generated" / "Image edited"); the trailing
+    /// guidance stops the model re-reading or narrating the result.
+    pub fn prompt_text(&self, action: &str) -> String {
+        let path = self.path.to_string_lossy().to_string();
+        let message = format!(
+            "{action} and saved to {path}. Do not read or re-display it, and do not describe how it appears to the user."
+        );
+        serde_json::json!({
+            "path": path,
+            "filename": &self.filename,
+            "session_folder": &self.session_folder,
+            "message": message,
+        })
+        .to_string()
+    }
+}
 use crate::implementations::grok_build::todo::{TodoItem, TodoState};
 use crate::implementations::skills::skill::SkillOutput;
 use crate::util::truncate::{DEFAULT_SOFT_WRAP_WIDTH, soft_wrap_lines};
@@ -587,6 +636,14 @@ pub enum ToolOutput {
     /// (e.g., memory_search, memory_get). The string is the pre-formatted
     /// prompt text — no additional rendering is needed.
     Text(TextOutput),
+    #[from(skip)]
+    ImageGen(MediaGenOutput),
+    #[from(skip)]
+    ImageToVideo(MediaGenOutput),
+    #[from(skip)]
+    ReferenceToVideo(MediaGenOutput),
+    #[from(skip)]
+    ImageEdit(MediaGenOutput),
 }
 impl ToolOutput {
     /// Whether this output is a logical tool failure, for `tool.execution`'s
@@ -905,6 +962,10 @@ impl ToolOutput {
             ToolOutput::Workflow(o) => o.message.clone(),
             ToolOutput::Dynamic(v) => serde_json::to_string_pretty(&v.value).unwrap_or_default(),
             ToolOutput::Text(text) => text.text.clone(),
+            ToolOutput::ImageGen(m) => m.prompt_text("Image generated"),
+            ToolOutput::ImageToVideo(m) => m.prompt_text("Video generated"),
+            ToolOutput::ReferenceToVideo(m) => m.prompt_text("Video generated"),
+            ToolOutput::ImageEdit(m) => m.prompt_text("Image edited"),
         }
     }
 }
@@ -1242,6 +1303,66 @@ mod tests {
             round_trip.consumed_completion_task_id.as_deref(),
             Some("task-abc")
         );
+    }
+    #[test]
+    fn media_gen_output() {
+        let cases = [
+            (
+                ToolOutput::ImageGen(MediaGenOutput::new("/tmp/images/1.jpg".into())),
+                "ImageGen",
+                "/tmp/images/1.jpg",
+                "1.jpg",
+                "images",
+                "Image generated and saved to /tmp/images/1.jpg. Do not read or re-display it, and do not describe how it appears to the user.",
+            ),
+            (
+                ToolOutput::ImageToVideo(MediaGenOutput::new("/tmp/videos/2.mp4".into())),
+                "ImageToVideo",
+                "/tmp/videos/2.mp4",
+                "2.mp4",
+                "videos",
+                "Video generated and saved to /tmp/videos/2.mp4. Do not read or re-display it, and do not describe how it appears to the user.",
+            ),
+            (
+                ToolOutput::ReferenceToVideo(MediaGenOutput::new("/tmp/videos/3.mp4".into())),
+                "ReferenceToVideo",
+                "/tmp/videos/3.mp4",
+                "3.mp4",
+                "videos",
+                "Video generated and saved to /tmp/videos/3.mp4. Do not read or re-display it, and do not describe how it appears to the user.",
+            ),
+            (
+                ToolOutput::ImageEdit(MediaGenOutput::new("/tmp/images/2.jpg".into())),
+                "ImageEdit",
+                "/tmp/images/2.jpg",
+                "2.jpg",
+                "images",
+                "Image edited and saved to /tmp/images/2.jpg. Do not read or re-display it, and do not describe how it appears to the user.",
+            ),
+        ];
+        for (output, ty, path, filename, session_folder, message) in cases {
+            let prompt_json: serde_json::Value =
+                serde_json::from_str(&output.to_prompt_format()).unwrap();
+            assert_eq!(prompt_json["path"], path);
+            assert_eq!(prompt_json["filename"], filename);
+            assert_eq!(prompt_json["session_folder"], session_folder);
+            assert_eq!(prompt_json["message"], message);
+            let json = to_json(output);
+            assert_eq!(json["type"], ty);
+            assert_eq!(json["path"], path);
+            assert_eq!(json["filename"], filename);
+            assert_eq!(json["session_folder"], session_folder);
+            let (ToolOutput::ImageGen(m)
+            | ToolOutput::ImageToVideo(m)
+            | ToolOutput::ReferenceToVideo(m)
+            | ToolOutput::ImageEdit(m)) = serde_json::from_value(json).unwrap()
+            else {
+                panic!("unexpected variant");
+            };
+            assert_eq!(m.path, PathBuf::from(path));
+            assert_eq!(m.filename, filename);
+            assert_eq!(m.session_folder, session_folder);
+        }
     }
     #[test]
     fn read_file_not_found_json() {

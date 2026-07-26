@@ -22,10 +22,10 @@ pub const RATE_LIMITED_ERROR_CODE: i32 = -32003;
 pub const RATE_LIMITED_USER_MESSAGE_OAUTH: &str =
     "You\u{2019}ve hit the rate limit for your plan. Upgrade your account or try again later.";
 
-/// API key / team rate-limit copy. Personal grok.com upgrades do not raise API
-/// team limits; admins purchase credits or a higher spend-based tier.
+/// API key / team rate-limit copy.
 /// See https://docs.x.ai/developers/rate-limits#rate-limit-tiers
-pub const RATE_LIMITED_USER_MESSAGE_API_KEY: &str = "You\u{2019}ve hit your team\u{2019}s API rate limit. Ask a team admin to purchase more credits for higher limits, or try again later. See https://docs.x.ai/developers/rate-limits#rate-limit-tiers";
+pub const RATE_LIMITED_USER_MESSAGE_API_KEY: &str =
+    "You\u{2019}ve hit your API rate limit. Try again later.";
 
 /// Well-known free-usage exhaustion code CCP returns on HTTP 429.
 /// Matches `prod_util_well_known_errors::SUBSCRIPTION_FREE_USAGE_EXHAUSTED`.
@@ -33,9 +33,10 @@ pub const RATE_LIMITED_USER_MESSAGE_API_KEY: &str = "You\u{2019}ve hit your team
 /// flattened message, so this reaches clients embedded in error detail.
 pub const FREE_USAGE_EXHAUSTED_ERROR_CODE: &str = "subscription:free-usage-exhausted";
 
-/// User-facing free-usage exhaustion copy (paywall). Deliberately promises no
-/// reset duration — the quota window is backend-config-driven.
-pub const FREE_USAGE_USER_MESSAGE: &str = "You\u{2019}ve reached your free Grok Build usage limit for now. Get SuperGrok for much higher limits, or try again later: https://grok.com/supergrok?referrer=grok-build";
+/// User-facing free-usage exhaustion copy. Deliberately promises no reset
+/// duration — the quota window is backend-config-driven.
+pub const FREE_USAGE_USER_MESSAGE: &str =
+    "You\u{2019}ve reached your usage limit for now. Try again later.";
 
 /// Whether flattened server detail is free-usage-quota exhaustion (paywall),
 /// not transient throttling. Sniffs the well-known code embedded by
@@ -46,9 +47,8 @@ pub fn is_free_usage_exhausted_error(detail: &str) -> bool {
 
 /// User-facing text for an ACP -32003 rate-limit error.
 ///
-/// Free-usage code first (consumer-only; intentional before API-key rewrite).
-/// API-key + personal SuperGrok upsell → team credits copy. Else the body
-/// after stripping `API error (status …):` (SamplingError Display prefix).
+/// Free-usage code first, else the body after stripping
+/// `API error (status …):` (SamplingError Display prefix).
 /// Empty → OAuth vs API-key fallback. Callers that show this in UI should
 /// still run their usual sanitizer (scrub/cap).
 pub fn format_rate_limited_user_message(
@@ -60,11 +60,7 @@ pub fn format_rate_limited_user_message(
         return FREE_USAGE_USER_MESSAGE.to_string();
     }
     if let Some(detail) = server_detail.map(str::trim).filter(|s| !s.is_empty()) {
-        let detail = strip_sampling_api_error_prefix(detail);
-        if is_api_key_auth && pushes_consumer_subscription_upsell(detail) {
-            return RATE_LIMITED_USER_MESSAGE_API_KEY.to_string();
-        }
-        return detail.to_string();
+        return strip_sampling_api_error_prefix(detail).to_string();
     }
     if is_api_key_auth {
         RATE_LIMITED_USER_MESSAGE_API_KEY
@@ -85,15 +81,6 @@ fn strip_sampling_api_error_prefix(detail: &str) -> &str {
         return rest[idx + SEP.len()..].trim();
     }
     detail.trim()
-}
-
-/// IC sometimes reuses OAuth free-tier upsell copy on 429s ("upgrade to a Grok
-/// subscription" / grok.com/supergrok). That is wrong for API-key / team auth:
-/// higher limits come from credits and spend-based rate-limit tiers, not a
-/// personal SuperGrok plan.
-fn pushes_consumer_subscription_upsell(detail: &str) -> bool {
-    let d = detail.to_ascii_lowercase();
-    d.contains("grok.com/supergrok") || d.contains("upgrade to a grok subscription")
 }
 
 /// Map a `SamplingError` to an ACP `Error` for client-facing responses.
@@ -386,12 +373,7 @@ mod tests {
             RATE_LIMITED_USER_MESSAGE_API_KEY
         );
         assert!(RATE_LIMITED_USER_MESSAGE_OAUTH.contains("Upgrade your account"));
-        assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("team"));
-        assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("credits"));
-        assert!(
-            RATE_LIMITED_USER_MESSAGE_API_KEY
-                .contains("https://docs.x.ai/developers/rate-limits#rate-limit-tiers")
-        );
+        assert!(RATE_LIMITED_USER_MESSAGE_API_KEY.contains("rate limit"));
         assert!(!RATE_LIMITED_USER_MESSAGE_API_KEY.contains("Upgrade your account"));
     }
 
@@ -403,7 +385,7 @@ mod tests {
         assert_eq!(format_rate_limited_user_message(Some(&wire), false), body);
         assert_eq!(format_rate_limited_user_message(Some(&wire), true), body);
 
-        // Team console rate-limit copy has no personal SuperGrok upsell — surface as-is.
+        // Team rate-limit copy is surfaced as-is.
         let team = "resource-exhausted: Too many requests for team abc. See https://console.x.ai/team/default/rate-limits.";
         let team_wire = format!("API error (status 429 Too Many Requests): {team}");
         assert_eq!(
@@ -413,21 +395,6 @@ mod tests {
         assert_eq!(
             format_rate_limited_user_message(Some("slow down"), false),
             "slow down"
-        );
-    }
-
-    #[test]
-    fn format_rate_limited_api_key_rewrites_consumer_subscription_upsell() {
-        let body = "Some resource has been exhausted: You are sending requests too quickly. \
-             Please slow down, or upgrade to a Grok subscription for higher limits: \
-             https://grok.com/supergrok";
-        let wire = format!("API error (status 429 Too Many Requests): {body}");
-        // OAuth keeps the IC body (personal plan upgrade is correct).
-        assert_eq!(format_rate_limited_user_message(Some(&wire), false), body);
-        // API key must not push grok.com SuperGrok — team credits / rate-limit tiers.
-        assert_eq!(
-            format_rate_limited_user_message(Some(&wire), true),
-            RATE_LIMITED_USER_MESSAGE_API_KEY
         );
     }
 

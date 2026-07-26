@@ -306,7 +306,7 @@ impl EndpointsConfig {
         }
         tracing::warn!(
             bucket = %bucket_url,
-            "trace_upload_bucket has unrecognized scheme (expected gs://), ignoring"
+            "trace_upload_bucket has unrecognized scheme (expected gs:// or s3://), ignoring"
         );
         None
     }
@@ -425,6 +425,9 @@ pub struct Requirements {
     pub tool_search: Constrained<bool>,
     pub web_fetch: Constrained<bool>,
     pub ask_user_question: Constrained<bool>,
+    pub image_gen: Constrained<bool>,
+    pub image_edit: Constrained<bool>,
+    pub video_gen: Constrained<bool>,
     pub write_file: Constrained<bool>,
     /// Voice dictation (STT). Pin via requirements/managed `[features] voice_mode`.
     pub voice_mode: Constrained<bool>,
@@ -1390,8 +1393,9 @@ pub struct Config {
     /// Resolved by [`crate::config::ToolsConfig::resolve`].
     #[serde(skip)]
     pub respect_gitignore: bool,
-    /// When `true`, ZDR-incompatible tools are dropped from the model's
-    /// tool set.
+    /// When `true`, `MvpAgent::prepare_video_gen_config` returns
+    /// `VideoGenConfig::Disabled`, dropping `video_gen` (and any
+    /// future ZDR-incompatible tools) from the model's tool set.
     /// Resolved by [`crate::config::ToolsConfig::resolve`].
     #[serde(skip)]
     pub disable_zdr_incompatible_tools: bool,
@@ -2353,6 +2357,76 @@ impl Config {
             .feature_flag(ff)
             .default(true)
             .resolve()
+    }
+    /// `image_gen` (+ `/imagine`). Default on.
+    ///
+    /// Precedence: requirement > env > `[features]` > remote > default.
+    pub(crate) fn resolve_image_gen(&self) -> Resolved<bool> {
+        if let Some(pinned) = self.requirements.image_gen.pinned() {
+            return Resolved::new(pinned, ConfigSource::Requirement);
+        }
+        BoolFlag::env("GROK_IMAGE_GEN")
+            .config(self.features.image_gen)
+            .feature_flag(
+                self.remote_settings
+                    .as_ref()
+                    .and_then(|s| s.image_gen_enabled),
+            )
+            .default(true)
+            .resolve()
+    }
+    /// `image_edit` tool gate. Same requirement pattern as
+    /// [`Self::resolve_image_gen`]; no `[features]` key (defaults on).
+    pub(crate) fn resolve_image_edit(&self) -> Resolved<bool> {
+        if let Some(pinned) = self.requirements.image_edit.pinned() {
+            return Resolved::new(pinned, ConfigSource::Requirement);
+        }
+        BoolFlag::env("GROK_IMAGE_EDIT").default(true).resolve()
+    }
+    /// `image_to_video` / `reference_to_video` (+ `/imagine-video`). Default on.
+    ///
+    /// Registered as a pair: both video tools share this gate.
+    /// Same precedence as [`Self::resolve_image_gen`].
+    pub(crate) fn resolve_video_gen(&self) -> Resolved<bool> {
+        if let Some(pinned) = self.requirements.video_gen.pinned() {
+            return Resolved::new(pinned, ConfigSource::Requirement);
+        }
+        BoolFlag::env("GROK_VIDEO_GEN")
+            .config(self.features.video_gen)
+            .feature_flag(
+                self.remote_settings
+                    .as_ref()
+                    .and_then(|s| s.video_gen_enabled),
+            )
+            .default(true)
+            .resolve()
+    }
+    /// Optional Imagine model override for `image_gen`. When set (non-empty),
+    /// `image_gen` calls this model slug instead of the default quality model.
+    /// Precedence: env `GROK_IMAGE_GEN_MODEL_OVERRIDE` > `[features]
+    /// image_gen_model_override` config > remote settings `image_gen_model_override`.
+    /// `None` → default model (`emu-image-quality`).
+    pub(crate) fn resolve_image_gen_model_override(&self) -> Option<String> {
+        resolve_string_flag(
+            None,
+            "GROK_IMAGE_GEN_MODEL_OVERRIDE",
+            self.features.image_gen_model_override.as_deref(),
+            self.remote_settings
+                .as_ref()
+                .and_then(|s| s.image_gen_model_override.as_deref()),
+        )
+        .map(|r| r.value)
+    }
+    pub(crate) fn resolve_image_edit_model_override(&self) -> Option<String> {
+        resolve_string_flag(
+            None,
+            "GROK_IMAGE_EDIT_MODEL_OVERRIDE",
+            self.features.image_edit_model_override.as_deref(),
+            self.remote_settings
+                .as_ref()
+                .and_then(|s| s.image_edit_model_override.as_deref()),
+        )
+        .map(|r| r.value)
     }
     /// Goal mode (`/goal`) master switch. Default ON: deployments that can't
     /// reach cli-chat-proxy `/v1/settings` (custom `models_base_url`, external
@@ -4165,6 +4239,18 @@ pub struct Features {
     /// compaction. `None` = defer to remote settings / env / default (`false`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub two_pass_compaction: Option<bool>,
+    /// `image_gen` / `/imagine`. `None` = env / remote / default (`true`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_gen: Option<bool>,
+    /// Video tools / `/imagine-video`. `None` = env / remote / default (`true`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub video_gen: Option<bool>,
+    /// `image_gen` Imagine model override. `None`/empty = defer to remote settings
+    /// (`image_gen_model_override`) / env / default (`emu-image-quality`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_gen_model_override: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_edit_model_override: Option<String>,
     /// Write file tool. `None` = defer to remote settings / env / default (true).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub write_file: Option<bool>,
@@ -8912,6 +8998,120 @@ reasoning_effort = "low"
         let r = cfg.resolve_ask_user_question();
         assert_eq!(r.source, ConfigSource::Remote);
         assert!(!r.value);
+    }
+    #[test]
+    #[serial]
+    fn resolve_image_gen_model_override_remote_settings_or_config() {
+        unsafe { std::env::remove_var("GROK_IMAGE_GEN_MODEL_OVERRIDE") };
+        let with = |config: Option<&str>, gb: Option<&str>| Config {
+            features: Features {
+                image_gen_model_override: config.map(String::from),
+                ..Default::default()
+            },
+            remote_settings: Some(crate::util::config::RemoteSettings {
+                image_gen_model_override: gb.map(String::from),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(Config::default().resolve_image_gen_model_override(), None);
+        assert_eq!(
+            with(None, Some("emu-image")).resolve_image_gen_model_override(),
+            Some("emu-image".to_owned())
+        );
+        assert_eq!(
+            with(Some("emu-image-pro"), Some("emu-image")).resolve_image_gen_model_override(),
+            Some("emu-image-pro".to_owned())
+        );
+    }
+    #[test]
+    #[serial]
+    fn resolve_image_edit_model_override_remote_settings_or_config() {
+        unsafe { std::env::remove_var("GROK_IMAGE_EDIT_MODEL_OVERRIDE") };
+        let with = |config: Option<&str>, gb: Option<&str>| Config {
+            features: Features {
+                image_edit_model_override: config.map(String::from),
+                ..Default::default()
+            },
+            remote_settings: Some(crate::util::config::RemoteSettings {
+                image_edit_model_override: gb.map(String::from),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(Config::default().resolve_image_edit_model_override(), None);
+        assert_eq!(
+            with(None, Some("emu-image")).resolve_image_edit_model_override(),
+            Some("emu-image".to_owned())
+        );
+        assert_eq!(
+            with(Some("emu-image-pro"), Some("emu-image")).resolve_image_edit_model_override(),
+            Some("emu-image-pro".to_owned())
+        );
+        let gen_only = Config {
+            remote_settings: Some(crate::util::config::RemoteSettings {
+                image_gen_model_override: Some("emu-image".to_owned()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(gen_only.resolve_image_edit_model_override(), None);
+    }
+    #[test]
+    #[serial]
+    fn resolve_image_gen_gates() {
+        unsafe { std::env::remove_var("GROK_IMAGE_GEN") };
+        assert!(Config::default().resolve_image_gen().value);
+        assert!(
+            !Config {
+                features: Features {
+                    image_gen: Some(false),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+            .resolve_image_gen()
+            .value
+        );
+        assert!(
+            !Config {
+                remote_settings: Some(crate::util::config::RemoteSettings {
+                    image_gen_enabled: Some(false),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }
+            .resolve_image_gen()
+            .value
+        );
+    }
+    #[test]
+    #[serial]
+    fn resolve_video_gen_gates() {
+        unsafe { std::env::remove_var("GROK_VIDEO_GEN") };
+        assert!(Config::default().resolve_video_gen().value);
+        assert!(
+            !Config {
+                features: Features {
+                    video_gen: Some(false),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+            .resolve_video_gen()
+            .value
+        );
+        assert!(
+            !Config {
+                remote_settings: Some(crate::util::config::RemoteSettings {
+                    video_gen_enabled: Some(false),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }
+            .resolve_video_gen()
+            .value
+        );
     }
     /// Clear every env var the goal/companion resolvers read so tests
     /// start from a known baseline regardless of run order.

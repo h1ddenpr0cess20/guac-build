@@ -1292,8 +1292,6 @@ mod cancel_turn_mouse_tests {
                 restore_degree: None,
                 rate_limited: false,
                 model_incompatible: false,
-                credit_limit_blocked: false,
-                free_usage_blocked: false,
                 available_commands: Vec::new(),
                 available_commands_generation: 0,
                 available_tools: None,
@@ -1650,7 +1648,7 @@ mod permission_scope_key_tests {
 #[cfg(test)]
 mod question_no_freeform_tests {
     //! Freeform ("Other") gating for `no_freeform` question modals — e.g.
-    //! the SuperGrok upsell. Regression tests for the bug where clicking
+    //! an upgrade modal. Regression tests for the bug where clicking
     //! under the last option of the upsell selected the (hidden) freeform
     //! row and let the user type into a modal that offers no free text.
     use super::super::test_fixtures::make_agent;
@@ -1677,8 +1675,8 @@ mod question_no_freeform_tests {
         Question {
             question: "You hit your free usage limit.".into(),
             options: vec![
-                opt("Upgrade to SuperGrok", "For everyday coding"),
-                opt("Upgrade to SuperGrok Heavy", "Highest usage limits"),
+                opt("Upgrade", "For everyday coding"),
+                opt("Upgrade Plus", "Highest usage limits"),
             ],
             multi_select: Some(false),
             id: None,

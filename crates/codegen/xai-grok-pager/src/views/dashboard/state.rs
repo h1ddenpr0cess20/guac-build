@@ -1445,13 +1445,6 @@ impl DashboardState {
         self.peek_reply.set_auto_mode_available(available);
     }
 
-    /// Replace the restricted slash-command deny list on both dashboard
-    /// prompt registries (dispatch + peek reply).
-    pub(crate) fn set_restricted_commands(&mut self, names: &[String]) {
-        self.dispatch.set_restricted_commands(names);
-        self.peek_reply.set_restricted_commands(names);
-    }
-
     /// Set the dispatch feedback slot to an error `msg`, prefixed with
     /// the error glyph (`✗`, or `x` on legacy consoles). The badge
     /// (`paint_dispatch_feedback_badge`) paints the slot VERBATIM in a

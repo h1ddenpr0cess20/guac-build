@@ -23,7 +23,7 @@ pub enum StreamingSttEvent {
     Error { message: String },
 }
 
-/// Streaming STT over `wss://api.x.ai/v1/stt`.
+/// Streaming STT over `wss://<api-host>/v1/stt`.
 pub struct StreamingSttSession {
     audio_tx: Option<mpsc::Sender<Vec<u8>>>,
     event_rx: mpsc::Receiver<StreamingSttEvent>,
@@ -46,13 +46,10 @@ impl StreamingSttSession {
                 .map_err(|e| VoiceError::WebSocket(format!("auth header: {e}")))?,
         );
 
-        // Request-identity headers so the backend can attribute and meter voice
-        // usage by client, mirroring what the sampler / imagine request paths
-        // send. Billing itself follows the `Authorization` bearer (per-user for
-        // OAuth, BYOK key owner otherwise); these are purely for usage
-        // attribution. Skipped when empty (e.g. the probe binary / tests) or
-        // when a value isn't a valid header (never fatal — the connection is
-        // still fully authorized without them).
+        // Request-identity headers, mirroring what the other request paths
+        // send. Skipped when empty (e.g. the probe binary / tests) or when a
+        // value isn't a valid header (never fatal — the connection is still
+        // fully authorized without them).
         insert_optional_header(
             &mut request,
             "x-guac-client-identifier",
@@ -303,7 +300,7 @@ mod tests {
 
     #[test]
     fn optional_header_inserted_when_present_skipped_when_empty() {
-        let mut req = "wss://api.x.ai/v1/stt".into_client_request().unwrap();
+        let mut req = "wss://api.example/v1/stt".into_client_request().unwrap();
         insert_optional_header(&mut req, "x-guac-client-identifier", "grok-shell");
         insert_optional_header(&mut req, "User-Agent", "");
         assert_eq!(
@@ -318,7 +315,7 @@ mod tests {
 
     #[test]
     fn optional_header_skips_invalid_value_without_panic() {
-        let mut req = "wss://api.x.ai/v1/stt".into_client_request().unwrap();
+        let mut req = "wss://api.example/v1/stt".into_client_request().unwrap();
         // A control char is not a valid header value; it must be dropped
         // silently, never panic or fail the (already-authorized) handshake.
         insert_optional_header(&mut req, "User-Agent", "bad\nvalue");

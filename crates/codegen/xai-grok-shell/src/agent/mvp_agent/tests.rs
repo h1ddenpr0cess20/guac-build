@@ -7,35 +7,6 @@ fn jwt_with_tier(tier: u64) -> String {
     let payload = enc.encode(format!(r#"{{"tier":{tier}}}"#).as_bytes());
     format!("{header}.{payload}.sig")
 }
-#[test]
-fn jwt_tier_claim_maps_free_and_paid() {
-    assert_eq!(jwt_tier_claim(&jwt_with_tier(0)).as_deref(), Some("free"));
-    assert_eq!(
-        jwt_tier_claim(&jwt_with_tier(1)).as_deref(),
-        Some("supergrok")
-    );
-    assert_eq!(
-        jwt_tier_claim(&jwt_with_tier(2)).as_deref(),
-        Some("x_basic")
-    );
-    assert_eq!(
-        jwt_tier_claim(&jwt_with_tier(3)).as_deref(),
-        Some("x_premium")
-    );
-    assert_eq!(
-        jwt_tier_claim(&jwt_with_tier(4)).as_deref(),
-        Some("x_premium_plus")
-    );
-    assert_eq!(
-        jwt_tier_claim(&jwt_with_tier(5)).as_deref(),
-        Some("supergrok_heavy")
-    );
-    assert_eq!(
-        jwt_tier_claim(&jwt_with_tier(6)).as_deref(),
-        Some("supergrok_lite")
-    );
-    assert_eq!(jwt_tier_claim(&jwt_with_tier(99)).as_deref(), Some("99"));
-}
 fn auth_with_mode(mode: crate::auth::AuthMode, key: &str) -> crate::auth::GrokAuth {
     crate::auth::GrokAuth {
         key: key.into(),
@@ -63,67 +34,6 @@ fn auth_with_mode(mode: crate::auth::AuthMode, key: &str) -> crate::auth::GrokAu
         oidc_issuer: None,
         oidc_client_id: None,
     }
-}
-#[test]
-fn resolve_subscription_tier_prefers_display_then_api_key_then_jwt() {
-    assert_eq!(
-        resolve_subscription_tier_for_telemetry(Some("Free".into()), None).as_deref(),
-        Some("Free")
-    );
-    let api = auth_with_mode(crate::auth::AuthMode::ApiKey, "xai-not-a-jwt");
-    assert_eq!(
-        resolve_subscription_tier_for_telemetry(Some("  ".into()), Some(&api)).as_deref(),
-        Some("api_key")
-    );
-    assert_eq!(
-        resolve_subscription_tier_for_telemetry(None, Some(&api)).as_deref(),
-        Some("api_key")
-    );
-    let oauth = auth_with_mode(crate::auth::AuthMode::Oidc, &jwt_with_tier(0));
-    assert_eq!(
-        resolve_subscription_tier_for_telemetry(None, Some(&oauth)).as_deref(),
-        Some("free")
-    );
-    assert_ne!(
-        resolve_subscription_tier_for_telemetry(None, Some(&api)).as_deref(),
-        Some("free")
-    );
-}
-/// JWT claim ↔ `/user` tier mapping used to gate post-unblock catalog refresh
-/// (a stale older paid claim must not skip retry).
-#[test]
-fn jwt_claim_matches_user_subscription_tier_known_pairs() {
-    let cases = [
-        ("supergrok", "GrokPro"),
-        ("x_basic", "XBasic"),
-        ("x_premium", "XPremium"),
-        ("x_premium_plus", "XPremiumPlus"),
-        ("supergrok_heavy", "SuperGrokPro"),
-        ("supergrok_lite", "SuperGrokLite"),
-    ];
-    for (claim, user_tier) in cases {
-        assert!(
-            jwt_claim_matches_user_subscription_tier(claim, user_tier),
-            "{claim} should match {user_tier}"
-        );
-    }
-}
-#[test]
-fn jwt_claim_matches_user_subscription_tier_rejects_stale_and_unknown() {
-    assert!(!jwt_claim_matches_user_subscription_tier(
-        "x_basic",
-        "SuperGrokPro"
-    ));
-    assert!(!jwt_claim_matches_user_subscription_tier(
-        "supergrok",
-        "SuperGrokPro"
-    ));
-    assert!(!jwt_claim_matches_user_subscription_tier("free", "GrokPro"));
-    assert!(!jwt_claim_matches_user_subscription_tier("", "XPremium"));
-    assert!(!jwt_claim_matches_user_subscription_tier(
-        "supergrok_heavy",
-        "EnterpriseMystery"
-    ));
 }
 /// Single-flight flag must clear on Drop even if the retry task panics /
 /// aborts mid-backoff (guards against the flag stuck true forever).
@@ -353,42 +263,6 @@ fn trace_turn_to_i32_saturates_at_max() {
     let boundary: u64 = i32::MAX as u64;
     let result = i32::try_from(boundary).unwrap_or(i32::MAX);
     assert_eq!(result, i32::MAX);
-}
-/// When remote settings are absent (`None`), default to blocked.
-#[test]
-fn settings_allow_access_none_settings_is_blocked() {
-    assert!(!settings_allow_access(None));
-}
-/// When `allow_access` is `Some(true)`, user is allowed.
-#[test]
-fn settings_allow_access_true_is_allowed() {
-    let rs = crate::util::config::RemoteSettings {
-        allow_access: Some(true),
-        ..Default::default()
-    };
-    assert!(settings_allow_access(Some(&rs)));
-}
-/// When `allow_access` is `Some(false)` (remote settings default / rule
-/// disabled), user stays blocked — even if they hold a qualifying
-/// subscription. This is the regression guard for the bug where
-/// `retry_subscription_check` unconditionally lifted the gate.
-#[test]
-fn settings_allow_access_false_is_blocked() {
-    let rs = crate::util::config::RemoteSettings {
-        allow_access: Some(false),
-        ..Default::default()
-    };
-    assert!(!settings_allow_access(Some(&rs)));
-}
-/// When `/settings` returned successfully but the field is absent
-/// (`None`), default to blocked (conservative).
-#[test]
-fn settings_allow_access_field_absent_is_blocked() {
-    let rs = crate::util::config::RemoteSettings {
-        allow_access: None,
-        ..Default::default()
-    };
-    assert!(!settings_allow_access(Some(&rs)));
 }
 /// After allocating a turn number, `session_turn_numbers` holds the next
 /// value (current + 1). This is the value that must be persisted via
@@ -1082,6 +956,8 @@ async fn file_toolset_override_e2e_to_finalized_toolset() {
         web_search_config: xai_grok_tools::implementations::web_search::WebSearchConfig::default(),
         web_fetch_config: Default::default(),
         lsp: None,
+        image_gen_config: xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig::default(),
+        video_gen_config: xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig::default(),
         app_builder_deployer_config: xai_grok_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig::default(),
         api_key_provider: None,
         auth_provider: None,
@@ -2291,18 +2167,6 @@ fn orphaned_tasks_filters_rewind_dead_branches() {
     );
 }
 #[test]
-fn allow_access_from_remote_settings() {
-    let json = serde_json::json!({ "allow_access": true });
-    let rs: crate::util::config::RemoteSettings = serde_json::from_value(json).unwrap();
-    assert_eq!(rs.allow_access, Some(true));
-    let json = serde_json::json!({ "allow_access": false });
-    let rs: crate::util::config::RemoteSettings = serde_json::from_value(json).unwrap();
-    assert_eq!(rs.allow_access, Some(false));
-    let json = serde_json::json!({});
-    let rs: crate::util::config::RemoteSettings = serde_json::from_value(json).unwrap();
-    assert_eq!(rs.allow_access, None);
-}
-#[test]
 fn on_demand_enabled_from_remote_settings() {
     let json = serde_json::json!({ "on_demand_enabled": false });
     let rs: crate::util::config::RemoteSettings = serde_json::from_value(json).unwrap();
@@ -2343,7 +2207,7 @@ async fn auth_type_session_based_no_current_returns_session_token() {
 /// BYOK guard. Users with `xai.api_key` must continue to report `ApiKey`
 /// regardless of live-token state -- BYOK sessions have nothing to refresh,
 /// and reporting `SessionToken` would route through cli-chat-proxy paths
-/// that don't apply to BYOK keys.
+/// (image_gen / video_gen base_url) that don't apply to BYOK keys.
 #[tokio::test(flavor = "current_thread")]
 async fn auth_type_xai_api_key_no_current_returns_api_key() {
     let agent = build_minimal_agent_for_tests();
@@ -2474,6 +2338,77 @@ async fn cached_token_fallthrough_falls_to_grok_com_without_credentials() {
             .map(|id| id.0.as_ref()),
         Some(GROK_COM_METHOD_ID),
         "no API-key creds and no kill switch -> interactive grok.com login",
+    );
+}
+/// `disable_zdr_incompatible_tools` drops `video_gen` outright: generation
+/// is server-side, so there is no ZDR-compatible way to run it.
+#[tokio::test(flavor = "current_thread")]
+async fn prepare_video_gen_config_disabled_when_zdr_flag_set() {
+    use xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig;
+    let agent = build_minimal_agent_for_tests();
+    agent.sampling_config.borrow_mut().api_key = Some("test-key".to_string());
+    assert!(matches!(
+        agent.prepare_video_gen_config(),
+        VideoGenConfig::Enabled { .. }
+    ));
+    agent.cfg.borrow_mut().disable_zdr_incompatible_tools = true;
+    assert!(matches!(
+        agent.prepare_video_gen_config(),
+        VideoGenConfig::Disabled
+    ));
+}
+#[tokio::test(flavor = "current_thread")]
+async fn prepare_video_gen_config_respects_feature_flag() {
+    use xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig;
+    let agent = build_minimal_agent_for_tests();
+    agent.sampling_config.borrow_mut().api_key = Some("test-key".to_string());
+    assert!(matches!(
+        agent.prepare_video_gen_config(),
+        VideoGenConfig::Enabled { .. }
+    ));
+    agent.cfg.borrow_mut().features.video_gen = Some(false);
+    assert!(matches!(
+        agent.prepare_video_gen_config(),
+        VideoGenConfig::Disabled
+    ));
+}
+/// The media tools call the API directly, so the server can only scope the
+/// coding data-retention opt-out (`/privacy opt-out`) to Build traffic via the
+/// `x-guac-client-identifier` header. If this header is dropped, opted-out
+/// users' media prompts are logged/retained server-side.
+#[tokio::test(flavor = "current_thread")]
+async fn prepare_image_gen_config_sends_client_identifier_header() {
+    use xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig;
+    let agent = build_minimal_agent_for_tests();
+    agent.sampling_config.borrow_mut().api_key = Some("test-key".to_string());
+    let ImageGenConfig::Enabled { extra_headers, .. } = agent.prepare_image_gen_config() else {
+        panic!("expected Enabled");
+    };
+    assert_eq!(
+        extra_headers
+            .get("x-guac-client-identifier")
+            .map(String::as_str),
+        Some(crate::http::process_client_identifier().as_str()),
+        "media API calls must carry the client identifier so the server \
+         applies the coding ZDR opt-out to Build traffic"
+    );
+}
+/// Same contract for video generation (also a direct API call).
+#[tokio::test(flavor = "current_thread")]
+async fn prepare_video_gen_config_sends_client_identifier_header() {
+    use xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig;
+    let agent = build_minimal_agent_for_tests();
+    agent.sampling_config.borrow_mut().api_key = Some("test-key".to_string());
+    let VideoGenConfig::Enabled { extra_headers, .. } = agent.prepare_video_gen_config() else {
+        panic!("expected Enabled");
+    };
+    assert_eq!(
+        extra_headers
+            .get("x-guac-client-identifier")
+            .map(String::as_str),
+        Some(crate::http::process_client_identifier().as_str()),
+        "video gen API calls must carry the client identifier so the server \
+         applies the coding ZDR opt-out to Build traffic"
     );
 }
 /// Regression: `x.ai/auth/info` must return profile fields even when the
@@ -4403,12 +4338,10 @@ async fn polled_announcements_apply_touches_announcements_only() {
     let agent = build_minimal_agent_for_tests();
     let mut stored = settings_with(Some(vec![ann("old")]));
     stored.tips = Some(vec!["stored-tip".to_string()]);
-    stored.allow_access = Some(true);
     stored.default_model = Some("stored-model".to_string());
     agent.cfg.borrow_mut().remote_settings = Some(stored);
     let mut fresh = settings_with(Some(vec![ann("new")]));
     fresh.tips = Some(vec!["fresh-tip".to_string()]);
-    fresh.allow_access = Some(false);
     fresh.default_model = Some("fresh-model".to_string());
     agent.apply_polled_announcements(fresh, Some(vec![ann("old")]));
     let cfg = agent.cfg.borrow();
@@ -4421,11 +4354,6 @@ async fn polled_announcements_apply_touches_announcements_only() {
         after.tips,
         Some(vec!["stored-tip".to_string()]),
         "tips must be untouched by a poll apply"
-    );
-    assert_eq!(
-        after.allow_access,
-        Some(true),
-        "allow_access must be untouched by a poll apply"
     );
     assert_eq!(
         after.default_model.as_deref(),

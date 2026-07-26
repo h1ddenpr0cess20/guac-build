@@ -171,6 +171,10 @@ pub(crate) struct SubagentSpawnContext {
     pub web_search_sampling_config: Option<xai_grok_sampler::SamplerConfig>,
     /// Resolved config for web fetch.
     pub web_fetch_config: xai_grok_tools::implementations::grok_build::web_fetch::WebFetchConfig,
+    /// Image generation config (parent-inherited).
+    pub image_gen_config: xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig,
+    /// Resolved config for video generation.
+    pub video_gen_config: xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig,
     /// Resolved config for the deploy service.
     pub app_builder_deployer_config:
         xai_grok_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig,

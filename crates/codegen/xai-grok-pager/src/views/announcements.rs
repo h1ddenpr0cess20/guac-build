@@ -1512,7 +1512,7 @@ mod tests {
         let mut ann = promo(
             "p",
             "New promo",
-            Some(("Get SuperGrok", "https://x.ai/grok")),
+            Some(("Upgrade", "https://example.invalid/upgrade")),
         );
         ann.cta.as_mut().unwrap().caption = Some("or use Ctrl+O".into());
         let anns = [ann];
@@ -1521,7 +1521,7 @@ mod tests {
         let hits = render_banner(area, &mut buf, &anns, &no_hidden(), false, false, true);
 
         let row0 = buf_row(&buf, area, 0);
-        assert!(row0.starts_with("[Get SuperGrok]"), "row0={row0:?}");
+        assert!(row0.starts_with("[Upgrade]"), "row0={row0:?}");
         assert!(
             !row0.contains("New promo"),
             "message must not paint on the banner; row0={row0:?}"
@@ -1533,9 +1533,9 @@ mod tests {
         assert!(row0.ends_with(HIDE_BUTTON), "row0={row0:?}");
         assert!(row0.contains(HIDE_CTA), "row0={row0:?}");
 
-        // [Label] = 15 cols at x 0; [hide] right-aligned at 80−6=74; the hide
+        // [Label] = 9 cols at x 0; [hide] right-aligned at 80−6=74; the hide
         // CTA ends gap-adjacent to it (74−2−25=47).
-        assert_eq!(hits.cta, Some(Rect::new(0, 0, 15, 1)), "[Label] hit rect");
+        assert_eq!(hits.cta, Some(Rect::new(0, 0, 9, 1)), "[Label] hit rect");
         assert_eq!(hits.hide, Some(Rect::new(74, 0, 6, 1)), "[hide] hit rect");
 
         let theme = Theme::current();
@@ -1578,10 +1578,7 @@ mod tests {
         let anns = [promo(
             "p",
             "msg",
-            Some((
-                "Upgrade to SuperGrok Heavy for the exclusive preview",
-                "https://x.ai",
-            )),
+            Some(("Upgrade for the exclusive preview", "https://x.ai")),
         )];
         let area = Rect::new(0, 0, 50, 1);
         let mut buf = Buffer::empty(area);

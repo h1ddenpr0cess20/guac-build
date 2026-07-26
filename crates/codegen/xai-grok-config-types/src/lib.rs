@@ -514,12 +514,6 @@ pub struct RemoteSettings {
     pub dream_min_sessions: Option<u64>,
     #[serde(default)]
     pub dream_check_interval_secs: Option<u64>,
-    /// Cadence (seconds) of the pager's free→paid subscription watch.
-    /// `0` disables it; the pager clamps and defaults (see its
-    /// `app::subscription` module). Forwarded from the `grok_build_settings`
-    /// remote settings flag via the CCP `/settings` flatten catch-all.
-    #[serde(default)]
-    pub subscription_watch_interval_secs: Option<u64>,
     #[serde(default)]
     pub writeback_enabled: Option<bool>,
     /// OAuth2 provider issuer URL (e.g., "https://auth.x.ai"). When present
@@ -810,6 +804,20 @@ pub struct RemoteSettings {
     /// is set in config.toml. Absent → default (**disabled** — ships dark).
     #[serde(default)]
     pub subagent_worktree_snapshot_enabled: Option<bool>,
+    /// `image_gen` / `/imagine`. `None` → env / `[features]` / default on.
+    #[serde(default)]
+    pub image_gen_enabled: Option<bool>,
+    /// Optional model override for `image_gen`. When present and non-empty,
+    /// `image_gen` uses this model slug (e.g. `emu-image`) instead of the
+    /// default quality model (`emu-image-quality`). Absent/empty → default.
+    #[serde(default)]
+    pub image_gen_model_override: Option<String>,
+    /// Optional model override for `image_edit`. Absent/empty → default.
+    #[serde(default)]
+    pub image_edit_model_override: Option<String>,
+    /// Video tools / `/imagine-video`. `None` → env / `[features]` / default on.
+    #[serde(default)]
+    pub video_gen_enabled: Option<bool>,
     /// When `Some(true)`, enable the process-wide image normalize cache that
     /// amortises decode + integrity-check + re-encode work across SessionActors.
     /// Default: disabled. See `session::normalize_cache`.
@@ -868,7 +876,7 @@ pub struct RemoteSettings {
     pub sharing_enabled: Option<bool>,
     /// Voice mode (STT dictation). Client default is **on** when absent.
     /// `Some(false)` is a remote kill switch; `Some(true)` forces on.
-    /// Overridable locally via `GROK_VOICE_MODE`. Free-tier SuperGrok upsell
+    /// Overridable locally via `GROK_VOICE_MODE`.
     /// is a separate client tier gate.
     #[serde(default)]
     pub voice_mode_enabled: Option<bool>,
@@ -935,32 +943,14 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub permission_mode: Option<String>,
     /// User's subscription tier from remote settings `grok_build_access_gate`.
-    /// E.g. "free", "premium", "supergrok", "supergrok_heavy".
+    /// E.g. "free", "premium", "pro".
     /// Stamped on analytics events + user profile for filtering.
     #[serde(default)]
     pub subscription_tier: Option<String>,
-    #[serde(default)]
-    pub gate_message: Option<String>,
-    #[serde(default)]
-    pub gate_url: Option<String>,
-    #[serde(default)]
-    pub gate_label: Option<String>,
     /// Whether the session picker groups entries by repo name.
     /// When `None` or `Some(false)`, sessions are shown in a flat list.
     #[serde(default)]
     pub session_picker_grouped: Option<bool>,
-    /// Whether the user is allowed to use Grok Build. Set by remote settings
-    /// `grok_build_access_gate` targeting rules. `None` = no server response
-    /// yet (client uses own fallback check). `Some(false)` = blocked.
-    #[serde(default)]
-    pub allow_access: Option<bool>,
-    /// User-friendly display name for the current subscription tier
-    /// (e.g. "SuperGrok", "X Premium+", "Free", "API Key"). Set by CCP
-    /// from the JWT tier claim (OAuth) or credential kind (API key).
-    /// Free/Invalid OAuth → `"Free"`; API keys → `"API Key"` (Mixpanel
-    /// `api_key`, never free).
-    #[serde(default)]
-    pub subscription_tier_display: Option<String>,
     /// Whether on-demand credit usage is enabled. When `Some(false)`, the
     /// billing extension blocks on-demand cap changes.
     #[serde(default)]

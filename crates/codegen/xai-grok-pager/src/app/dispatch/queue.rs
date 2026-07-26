@@ -1020,7 +1020,7 @@ mod tests {
         simulate_subagent_wait, simulate_task_output_wait, simulate_task_output_wait_call,
     };
     use crate::app::dispatch::router::dispatch;
-    use crate::app::dispatch::tests::{end_turn, enqueue_local, test_app_with_agent};
+    use crate::app::dispatch::tests::{enqueue_local, test_app_with_agent};
 
     /// A running background bash task for the work-count fixtures.
     fn running_bg_task(task_id: &str) -> crate::app::agent::BgTaskState {
@@ -1062,73 +1062,6 @@ mod tests {
     }
 
     // ── Drain-blocking tests ───────────────────────────────────────────
-
-    #[test]
-    fn drain_blocked_when_editing_front_prompt() {
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-
-        // Queue 3 prompts, first one drains immediately (turn starts); the
-        // follow-ups populate the local queue directly (see `enqueue_local`).
-        dispatch(Action::SendPrompt("first".into()), &mut app);
-        enqueue_local(&mut app, id, "second");
-        enqueue_local(&mut app, id, "third");
-        assert!(app.agents[&id].session.state.is_turn_running());
-        assert_eq!(app.agents[&id].session.queue_len(), 2);
-
-        // Simulate user editing "second" (which becomes front after "first" ends).
-        let second_id = app.agents[&id].session.pending_prompts[0].id;
-        app.agents.get_mut(&id).unwrap().prompt_mode = PromptMode::EditingQueued {
-            id: second_id,
-            original: "second".into(),
-            server_id: None,
-            kind: crate::app::agent::QueueEntryKind::Prompt,
-        };
-
-        // Turn ends → should NOT drain "second" (user is editing it), only FetchBilling.
-        let effects = dispatch(end_turn(), &mut app);
-        assert_eq!(effects.len(), 1);
-        assert!(matches!(
-            &effects[0],
-            Effect::FetchBilling { silent: true, .. }
-        ));
-        assert!(app.agents[&id].session.state.is_idle());
-        // "second" should still be in the queue.
-        assert_eq!(app.agents[&id].session.queue_len(), 2);
-        assert_eq!(app.agents[&id].session.pending_prompts[0].text, "second");
-    }
-
-    #[test]
-    fn drain_not_blocked_when_editing_non_front_prompt() {
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-
-        // Queue 3 prompts, first drains.
-        dispatch(Action::SendPrompt("first".into()), &mut app);
-        enqueue_local(&mut app, id, "second");
-        enqueue_local(&mut app, id, "third");
-
-        // Simulate user editing "third" (NOT the front).
-        let third_id = app.agents[&id].session.pending_prompts[1].id;
-        app.agents.get_mut(&id).unwrap().prompt_mode = PromptMode::EditingQueued {
-            id: third_id,
-            original: "third".into(),
-            server_id: None,
-            kind: crate::app::agent::QueueEntryKind::Prompt,
-        };
-
-        // Turn ends → should drain "second" (front, not being edited) + FetchBilling.
-        let effects = dispatch(end_turn(), &mut app);
-        assert_eq!(effects.len(), 2);
-        assert!(matches!(&effects[0], Effect::SendPrompt { text, .. } if text == "second"));
-        assert!(matches!(
-            &effects[1],
-            Effect::FetchBilling { silent: true, .. }
-        ));
-        // "third" should still be in queue.
-        assert_eq!(app.agents[&id].session.queue_len(), 1);
-        assert_eq!(app.agents[&id].session.pending_prompts[0].text, "third");
-    }
 
     #[test]
     fn drain_queue_action_sends_front_prompt() {
@@ -2170,69 +2103,6 @@ mod tests {
             Some("task-1"),
             "cron_task_id must track the running cron task"
         );
-    }
-
-    #[test]
-    fn drain_after_editing_sends_correct_prompt() {
-        // Regression: editing #3, prompts #1 and #2 drain, #3 becomes front.
-        // User presses Enter (save) → DrainQueue should send #3's updated text,
-        // NOT #4 or the old text.
-        let mut app = test_app_with_agent();
-        let id = AgentId(0);
-
-        // Queue 4 prompts, first drains.
-        dispatch(Action::SendPrompt("p1".into()), &mut app);
-        enqueue_local(&mut app, id, "p2");
-        enqueue_local(&mut app, id, "p3");
-        enqueue_local(&mut app, id, "p4");
-        assert_eq!(app.agents[&id].session.queue_len(), 3); // p2, p3, p4
-
-        // End turn for p1 → sets Idle → maybe_drain_queue pops p2 → Running again.
-        // Queue is now: p3, p4.
-        dispatch(end_turn(), &mut app);
-        assert_eq!(app.agents[&id].session.queue_len(), 2);
-
-        // Start editing p3 (now front).
-        let p3_id = app.agents[&id].session.pending_prompts[0].id;
-        app.agents.get_mut(&id).unwrap().prompt_mode = PromptMode::EditingQueued {
-            id: p3_id,
-            original: "p3".into(),
-            server_id: None,
-            kind: crate::app::agent::QueueEntryKind::Prompt,
-        };
-
-        // End turn for p2 → should NOT drain p3 (being edited), only FetchBilling.
-        let effects = dispatch(end_turn(), &mut app);
-        assert_eq!(effects.len(), 1);
-        assert!(
-            matches!(&effects[0], Effect::FetchBilling { silent: true, .. }),
-            "drain should be blocked, only billing refresh"
-        );
-        assert_eq!(app.agents[&id].session.queue_len(), 2); // p3, p4
-
-        // Simulate user saving edited text.
-        app.agents
-            .get_mut(&id)
-            .unwrap()
-            .session
-            .pending_prompts
-            .iter_mut()
-            .find(|p| p.id == p3_id)
-            .unwrap()
-            .text = "p3-edited".into();
-        app.agents.get_mut(&id).unwrap().prompt_mode = PromptMode::Normal;
-
-        // DrainQueue after edit → should send "p3-edited", not "p4".
-        let effects = dispatch(Action::DrainQueue, &mut app);
-        assert_eq!(effects.len(), 1);
-        assert!(
-            matches!(&effects[0], Effect::SendPrompt { text, .. } if text == "p3-edited"),
-            "should send the edited prompt, got: {:?}",
-            effects[0]
-        );
-        // p4 should still be in queue.
-        assert_eq!(app.agents[&id].session.queue_len(), 1);
-        assert_eq!(app.agents[&id].session.pending_prompts[0].text, "p4");
     }
 
     #[test]

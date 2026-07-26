@@ -180,6 +180,9 @@ pub fn workspace_grok_build_toolset() -> ToolServerConfig {
     tools.push((&grok_build::ExitPlanModeTool).into());
     tools.push((&grok_build::AskUserQuestionTool).into());
     tools.push((&grok_build::WebSearchTool).into());
+    tools.push((&grok_build::ImageGenTool).into());
+    tools.push((&grok_build::ImageToVideoTool).into());
+    tools.push((&grok_build::ReferenceToVideoTool).into());
     tools.push((&grok_build::WebFetchTool).into());
     tools.push((&memory::search_tool::MemorySearchImpl).into());
     tools.push((&memory::get_tool::MemoryGetImpl).into());
@@ -459,6 +462,10 @@ fn orchestrator_toolset() -> ToolServerConfig {
             // Web tools
             (&grok_build::WebSearchTool).into(),
             (&grok_build::WebFetchTool).into(),
+            // Imagine
+            (&grok_build::ImageGenTool).into(),
+            (&grok_build::ImageToVideoTool).into(),
+            (&grok_build::ReferenceToVideoTool).into(),
             // Memory
             (&memory::MemorySearchImpl).into(),
             (&memory::MemoryGetImpl).into(),
@@ -763,8 +770,8 @@ pub struct AgentDefinition {
     pub agents_md: bool,
     /// When true (the default), the AgentBuilder layers session-level optional
     /// tools on top of the agent's declared `tool_config`: memory_search/get,
-    /// web_search, web_fetch, lsp, OpenCode write fallback, and the
-    /// plan-mode tools.
+    /// web_search, web_fetch, lsp, image_gen, video_gen, OpenCode write
+    /// fallback, and the plan-mode tools.
     ///
     /// Set this to `false` for harnesses that need an exact, minimal toolset
     /// (e.g. the compat harness, where every advertised tool must match the

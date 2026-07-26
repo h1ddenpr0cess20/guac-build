@@ -264,7 +264,6 @@ pub struct SlashController {
     /// Offer `/announcements` when session announcements (critical or promo) exist.
     has_session_announcements: bool,
     /// Consumer billing surface — gates `/usage` subcommands. Default `true`.
-    billing_surface_visible: bool,
     workflows_available: bool,
     /// Effective render mode of this process (immutable after startup — it only
     /// changes via a full `/minimal`-`/fullscreen` re-exec). Injected via
@@ -306,7 +305,6 @@ impl SlashController {
             cwd,
             hide_session_scoped: false,
             has_session_announcements: false,
-            billing_surface_visible: true,
             workflows_available: false,
             screen_mode: crate::app::ScreenMode::Fullscreen,
             mru,
@@ -341,14 +339,6 @@ impl SlashController {
         self.has_session_announcements
     }
 
-    pub fn set_billing_surface_visible(&mut self, visible: bool) {
-        self.billing_surface_visible = visible;
-    }
-
-    pub fn billing_surface_visible(&self) -> bool {
-        self.billing_surface_visible
-    }
-
     pub fn set_workflows_available(&mut self, available: bool) {
         self.workflows_available = available;
     }
@@ -371,7 +361,6 @@ impl SlashController {
             models,
             cwd: &self.cwd,
             has_session_announcements: self.has_session_announcements,
-            billing_surface_visible: self.billing_surface_visible,
             workflows_available: self.workflows_available,
             screen_mode: self.screen_mode,
         }
@@ -2283,7 +2272,7 @@ mod tests {
     }
 
     /// Tier-restricted commands stay in the dropdown (discoverability) even
-    /// though `get()` blocks execution — invoking one shows the SuperGrok
+    /// though `get()` blocks execution — invoking one is
     /// upsell (covered by the dispatch-level tests).
     #[test]
     fn restricted_commands_stay_visible_in_dropdown() {
