@@ -774,8 +774,10 @@ async fn provider_helper_env_scrubs_first_party_credentials() {
         "GROK_DEPLOYMENT_KEY",
         "GROK_EXTRA_AUTH_KEY",
         "GROK_TRACE_UPLOAD_CREDENTIALS_FILE",
-        "OTEL_EXPORTER_OTLP_HEADERS",
-        "GROK_INTERNAL_OTLP_HEADERS",
+        // Audited removal: OTEL_EXPORTER_OTLP_HEADERS and GROK_INTERNAL_OTLP_HEADERS
+        // carried bearer tokens for the OTLP exporters. Both exporters and the
+        // config fields that fed them are gone, so neither var is read any more
+        // and there is no credential left to scrub.
     ];
     assert_eq!(
         crate::agent::config::FIRST_PARTY_CREDENTIAL_ENV_VARS,

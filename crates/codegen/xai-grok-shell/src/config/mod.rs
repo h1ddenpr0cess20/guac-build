@@ -1179,24 +1179,6 @@ fn apply_requirements_inner(
         config.endpoints.deployment_key,
         redacted
     );
-    enforce_str!("telemetry", "events_url", config.telemetry.events_url);
-    enforce_str!(
-        "telemetry",
-        "events_api_key",
-        config.telemetry.events_api_key,
-        redacted
-    );
-    enforce_val!(
-        "telemetry",
-        "mixpanel_enabled",
-        config.telemetry.mixpanel_enabled
-    );
-    enforce_str!(
-        "telemetry",
-        "mixpanel_token",
-        config.telemetry.mixpanel_token,
-        redacted
-    );
     enforce_str!(
         "endpoints",
         "trace_upload_bucket",
