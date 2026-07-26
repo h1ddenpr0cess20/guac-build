@@ -464,44 +464,6 @@ impl MvpAgent {
         let deployment_key = cfg.endpoints.deployment_key.clone();
         Some((base_url, user_token, alpha_test_key, deployment_key))
     }
-    pub(super) fn ensure_telemetry_client(&self) {
-        crate::auth::credential_provider::sync_external_otel_identity();
-        let cfg = self.cfg.borrow();
-        let mode = cfg.resolve_telemetry_mode().value;
-        if !mode.is_disabled() {
-            let Some(auth) = self
-                .auth_manager
-                .current()
-                .filter(|a| {
-                    a.is_xai_auth() || a.auth_mode == crate::auth::AuthMode::ApiKey
-                }) else {
-                return;
-            };
-            let subscription_tier = resolve_subscription_tier_for_telemetry(
-                cfg
-                    .remote_settings
-                    .as_ref()
-                    .and_then(|rs| rs.subscription_tier_display.clone()),
-                Some(&auth),
-            );
-            let (user_id, team_id) = if auth.is_xai_auth() {
-                (Some(auth.user_id), auth.team_id)
-            } else {
-                (None, auth.team_id)
-            };
-            xai_grok_telemetry::client::init_if_needed(
-                cfg.telemetry.clone(),
-                mode,
-                user_id,
-                team_id,
-                cfg.endpoints.deployment_key.clone(),
-                self.origin_client_info_from_meta(None),
-                xai_grok_version::VERSION.to_owned(),
-                subscription_tier,
-                crate::http::shared_client(),
-            );
-        }
-    }
     /// Build a `FeedbackClient` with resolved feedback URL and credentials.
     pub(crate) fn feedback_client(&self) -> Option<FeedbackClient> {
         let (base_url, user_token, alpha_test_key, deployment_key) = self
@@ -830,14 +792,7 @@ impl MvpAgent {
             return;
         };
         tracing::info!("post-auth settings refreshed");
-        let (
-            telemetry_config,
-            telemetry_mode,
-            grok_user_id,
-            grok_team_id,
-            deployment_key,
-            subscription_tier,
-        ) = {
+        {
             let mut cfg = self.cfg.borrow_mut();
             cfg.remote_settings = Some(settings);
             crate::util::config::sync_campaign_fields(&mut cfg);
@@ -851,40 +806,8 @@ impl MvpAgent {
                 trace_upload = %trace_upload,
                 "post-auth data capture config re-resolved",
             );
-            let grok_user_id = is_xai.then(|| user_id.clone());
-            let grok_team_id = is_xai.then(|| team_id.clone()).flatten();
-            let telemetry_config = cfg.telemetry.clone();
-            let deployment_key = cfg.endpoints.deployment_key.clone();
-            let subscription_tier_display = cfg
-                .remote_settings
-                .as_ref()
-                .and_then(|rs| rs.subscription_tier_display.clone());
-            (
-                telemetry_config,
-                telemetry_mode.value,
-                grok_user_id,
-                grok_team_id,
-                deployment_key,
-                subscription_tier_display,
-            )
-        };
+        }
         self.sync_collection_config_gate();
-        let subscription_tier = resolve_subscription_tier_for_telemetry(
-            subscription_tier,
-            self.auth_manager.current_or_expired().as_ref(),
-        );
-        xai_grok_telemetry::client::init(
-            telemetry_config,
-            telemetry_mode,
-            grok_user_id,
-            grok_team_id,
-            deployment_key,
-            self.origin_client_info_from_meta(None),
-            xai_grok_version::VERSION.to_owned(),
-            subscription_tier,
-            crate::http::shared_client(),
-        );
-        crate::auth::credential_provider::sync_external_otel_identity();
         self.emit_announcements(AnnouncementsPushMode::IfChanged);
         self.reconfigure_heap_profile_monitor();
         if remote_was_absent {
@@ -1267,45 +1190,11 @@ impl MvpAgent {
         );
         (id.clone(), new_config)
     }
-    /// Whether the current session is a personal grok.com account on a gated
-    /// tier (free / X Basic). The Imagine tools stay advertised to the model but
-    /// are flagged tier-restricted so they short-circuit at call time with the
-    /// SuperGrok upsell prose (see `ImageGenConfig`/`VideoGenConfig`'s
-    /// `tier_restricted`).
-    ///
-    /// Fails **open** (returns `false`) whenever we can't positively confirm a
-    /// restricted personal tier — no auth yet, BYOK / API-key sessions, team
-    /// accounts, and an unknown/absent tier all pass. The server
-    /// authoritatively zero-limits Imagine for free & X Basic (429), so this
-    /// client gate is a UX optimization (a clean in-chat upsell instead of a
-    /// doomed request), never the security boundary — under-restricting is safe,
-    /// over-restricting would wrongly disable a paid feature.
-    ///
-    /// Mirrors the pager's cosmetic slash-command gate
-    /// ([`crate::tier::is_restricted_tier_name`]); the only difference is the
-    /// absent-tier policy (the pager hides on `None`, we fail open on `None`).
-    fn is_tier_restricted_capability(&self) -> bool {
-        let Some(auth) = self.auth_manager.current() else {
-            return false;
-        };
-        if !auth.is_xai_auth() || auth.team_id.is_some() {
-            return false;
-        }
-        let tier = self
-            .cfg
-            .borrow()
-            .remote_settings
-            .as_ref()
-            .and_then(|rs| rs.subscription_tier_display.clone())
-            .or_else(|| jwt_tier_claim(&auth.key));
-        tier.as_deref().is_some_and(crate::tier::is_restricted_tier_name)
-    }
     /// Build image generation config.
     ///
-    /// Both BYOK and session (OAuth) users go direct to `xai_api_base_url`.
-    /// `sampling_config.api_key` carries the OAuth bearer for session users (the
-    /// `api_key_provider` refreshes it per request), so IC authenticates and
-    /// meters Imagine usage per-user.
+    /// Both BYOK and session users go direct to `xai_api_base_url`.
+    /// `sampling_config.api_key` carries the session bearer (the
+    /// `api_key_provider` refreshes it per request).
     pub(super) fn prepare_image_gen_config(
         &self,
     ) -> xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig {
@@ -1314,7 +1203,6 @@ impl MvpAgent {
         let Some(ref api_key) = sampling_config.api_key else {
             return ImageGenConfig::Disabled;
         };
-        let tier_restricted = self.is_tier_restricted_capability();
         let cfg = self.cfg.borrow();
         let base_url = cfg.endpoints.xai_api_base_url.clone();
         let version = cfg
@@ -1338,7 +1226,6 @@ impl MvpAgent {
             image_edit_enabled: cfg.resolve_image_edit().value,
             model_override: cfg.resolve_image_gen_model_override(),
             edit_model_override: cfg.resolve_image_edit_model_override(),
-            tier_restricted,
         }
     }
     /// Build deploy-service config. The tool talks directly to the deployer service.
@@ -1348,7 +1235,7 @@ impl MvpAgent {
         use xai_grok_tools::implementations::grok_build::deploy_app::AppBuilderDeployerConfig;
         AppBuilderDeployerConfig::Disabled
     }
-    /// Build video generation config. Video tools call the xAI API directly.
+    /// Build video generation config. Video tools call the API directly.
     pub(super) fn prepare_video_gen_config(
         &self,
     ) -> xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig {
@@ -1360,13 +1247,7 @@ impl MvpAgent {
         let Some(api_key) = self.sampling_config.borrow().api_key.clone() else {
             return VideoGenConfig::Disabled;
         };
-        let tier_restricted = self.is_tier_restricted_capability();
-        let zdr_video_output_s3 = cfg
-            .disable_zdr_incompatible_tools
-            .then(|| cfg.zdr_video_output_s3.clone())
-            .flatten()
-            .filter(|s3| s3.is_valid());
-        if cfg.disable_zdr_incompatible_tools && zdr_video_output_s3.is_none() {
+        if cfg.disable_zdr_incompatible_tools {
             tracing::info!("video_gen disabled by tools.disable_zdr_incompatible_tools");
             return VideoGenConfig::Disabled;
         }
@@ -1388,8 +1269,6 @@ impl MvpAgent {
             api_key,
             base_url,
             extra_headers: headers,
-            zdr_video_output_s3: zdr_video_output_s3.map(Box::new),
-            tier_restricted,
         }
     }
     pub(super) fn prepare_web_search_sampling_config(&self) -> Option<SamplingConfig> {
@@ -1571,7 +1450,6 @@ impl MvpAgent {
             interactive_trust_prompted: Rc::new(
                 RefCell::new(std::collections::HashSet::new()),
             ),
-            tier_allowed: std::cell::Cell::new(true),
             storage_mode,
             default_yolo_mode,
             default_auto_mode,
@@ -1635,12 +1513,6 @@ impl MvpAgent {
                 instance.cfg.borrow().grok_com_config.auth_provider_command.clone(),
                 instance.diagnostic_upload_config(),
             );
-        crate::auth::credential_provider::wire_otel_auth_manager(
-            instance.auth_manager.clone(),
-        );
-        if let Some(ref dk) = instance.cfg.borrow().endpoints.deployment_key {
-            crate::auth::credential_provider::wire_otel_deployment_key(dk.clone());
-        }
         instance
     }
     /// Handle `x.ai/internal/evict_sessions` — the leader server tells us a
@@ -2489,9 +2361,6 @@ impl MvpAgent {
                         }
                     }
                 }
-                crate::session::repo_changes::UploadMethod::S3 { bucket, .. } => {
-                    Some(format!("s3://{bucket}"))
-                }
                 crate::session::repo_changes::UploadMethod::Proxy { .. } => None,
             }
         };
@@ -2713,9 +2582,6 @@ impl MvpAgent {
                             return None;
                         }
                     }
-                }
-                crate::session::repo_changes::UploadMethod::S3 { bucket, .. } => {
-                    Some(format!("s3://{bucket}"))
                 }
                 crate::session::repo_changes::UploadMethod::Proxy { .. } => None,
             }

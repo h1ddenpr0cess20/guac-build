@@ -625,7 +625,7 @@ pub(crate) async fn spawn_session_actor(
     let bridge_state_path =
         crate::session::persistence::session_dir(&session_info).join("tool_state.json");
     let initial_agent_type = Some(agent_definition.name.clone());
-    let harness_metrics = if telemetry_enabled || xai_grok_telemetry::external::is_active() {
+    let harness_metrics = if telemetry_enabled {
         let plugin_names = plugin_registry
             .as_ref()
             .map(|reg| {

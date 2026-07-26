@@ -17,13 +17,6 @@ pub enum UploadMethod {
         deployment_key: Option<String>,
         alpha_test_key: Option<String>,
     },
-    S3 {
-        bucket: String,
-        region: String,
-        credentials_file: Option<String>,
-        credentials_content: Option<String>,
-        endpoint_url: Option<String>,
-    },
 }
 
 /// Configuration for object-storage export.

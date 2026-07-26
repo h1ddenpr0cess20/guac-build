@@ -47,13 +47,10 @@ pub fn default_agent_type() -> String {
 }
 /// Default base URL for the OpenAI-compatible Meta Model API.
 ///
-/// The legacy constant names are retained internally to keep this downstream
-/// fork's patch focused and make future upstream rebases tractable.
-pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://api.meta.ai/v1";
-/// Default inference base URL for Guac Build.
-pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.meta.ai/v1";
-/// Default base URL for the asset server (profile images, etc.).
-pub const ASSET_SERVER_URL_DEFAULT: &str = "https://assets.grok.com";
+/// Re-exported from the [`xai_grok_env`] leaf crate rather than spelled out
+/// again: the trust predicates in `util` derive their host from the same
+/// constant, and a second literal here is what let the two drift apart.
+pub const API_BASE_URL_DEFAULT: &str = crate::env::PROD_API_BASE_URL;
 /// One or more environment variable names that may hold a model API key.
 ///
 /// Serde `untagged`: accepts a string or an array in TOML/JSON.
@@ -194,58 +191,6 @@ pub struct EndpointsConfig {
     /// Defaults to `{proxy_url()}/deployment/config`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub managed_config_url: Option<String>,
-    /// Env: `OTEL_EXPORTER_OTLP_ENDPOINT`. OTLP collector base; `/v1/traces` is
-    /// appended. Legacy repoint of the INTERNAL trace pipeline — deprecated in
-    /// favor of `GROK_INTERNAL_OTLP_TRACES_ENDPOINT`, and ignored by the internal
-    /// pipeline when `GROK_EXTERNAL_OTEL` is set (the standard `OTEL_*` vars then
-    /// route the external stream only).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub otel_exporter_otlp_endpoint: Option<String>,
-    /// Env: `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`. Full traces endpoint, used
-    /// verbatim; overrides `otel_exporter_otlp_endpoint`. Same legacy/deprecation
-    /// semantics as `otel_exporter_otlp_endpoint`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub otel_exporter_otlp_traces_endpoint: Option<String>,
-    /// Env: `OTEL_EXPORTER_OTLP_HEADERS`. `k=v,k2=v2`; merged onto export headers.
-    /// Same legacy/deprecation semantics as `otel_exporter_otlp_endpoint`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub otel_exporter_otlp_headers: Option<String>,
-    /// Env: `GROK_INTERNAL_OTLP_TRACES_ENDPOINT`. Full INTERNAL traces endpoint,
-    /// used verbatim. Dev/debug repoint of the internal span firehose (replaces
-    /// the legacy `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` behavior; used by
-    /// local-ic-testing / internal dev flows). Wins over the legacy `OTEL_*` vars.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub grok_internal_otlp_traces_endpoint: Option<String>,
-    /// Env: `GROK_INTERNAL_OTLP_HEADERS`. `k=v,k2=v2` extra headers for the
-    /// internal export (debug). Wins over the legacy `OTEL_EXPORTER_OTLP_HEADERS`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub grok_internal_otlp_headers: Option<String>,
-    /// External-OTEL master switch, captured at construction via
-    /// [`external_otel_master_switch_resolved`] — the same layered resolution
-    /// (requirement pin > `GROK_EXTERNAL_OTEL` env > `[telemetry].otel_enabled`
-    /// config, managed layers included) that activates the external stream.
-    /// When set, the standard `OTEL_EXPORTER_OTLP_*` vars are reserved for the
-    /// external OTEL stream and the internal trace pipeline ignores them
-    /// entirely — an admin who opts in (by *any* layer, including an org
-    /// enable distributed via managed config with no env var) never receives
-    /// the internally-authed firehose. Held as a field (not re-read in the
-    /// resolvers) so the resolvers stay pure and testable without env races.
-    #[serde(skip)]
-    pub external_otel_master_switch: bool,
-    /// Env: `OTEL_TRACES_EXPORTER`. `otlp` (default) or `none` to disable spans.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub otel_traces_exporter: Option<String>,
-    /// Env: `OTEL_BSP_SCHEDULE_DELAY` (OTel) or `OTEL_TRACES_EXPORT_INTERVAL`
-    /// (Claude alias). Batch flush interval (ms).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub otel_traces_export_interval: Option<u64>,
-    /// Env: `OTEL_EXPORTER_OTLP_TIMEOUT`. Export HTTP timeout (ms).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub otel_exporter_otlp_timeout: Option<u64>,
-    /// Base URL for the asset server (profile images, etc.).
-    /// Env: `GROK_ASSET_SERVER_URL`.
-    #[serde(default = "default_asset_server_url")]
-    pub asset_server_url: String,
     /// Read by `load_management_api_key_sync()`. Declared for `serde_ignored`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub management_api_key: Option<String>,
@@ -253,27 +198,12 @@ pub struct EndpointsConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gcs_service_account_key: Option<String>,
 }
-pub(crate) fn default_asset_server_url() -> String {
-    std::env::var("GROK_ASSET_SERVER_URL").unwrap_or_else(|_| ASSET_SERVER_URL_DEFAULT.to_owned())
-}
 /// A blank or whitespace-only override counts as unset. Single source of truth
 /// for the "empty value = not configured" rule shared by the endpoint resolvers.
 fn blank_as_unset(opt: &Option<String>) -> Option<String> {
     opt.as_deref()
         .filter(|s| !s.trim().is_empty())
         .map(str::to_owned)
-}
-/// Parse a `k=v,k2=v2` OTLP header list (the `OTEL_EXPORTER_OTLP_HEADERS`
-/// format, shared with `GROK_INTERNAL_OTLP_HEADERS`): split on `,`,
-/// `split_once('=')`, trim key/value, skip blank keys, keep empty values.
-fn parse_otlp_header_list(raw: &str) -> Vec<(String, String)> {
-    raw.split(',')
-        .filter_map(|kv| {
-            let (k, v) = kv.split_once('=')?;
-            let k = k.trim();
-            (!k.is_empty()).then(|| (k.to_string(), v.trim().to_string()))
-        })
-        .collect()
 }
 impl EndpointsConfig {
     pub fn has_custom_endpoint(&self) -> bool {
@@ -294,7 +224,6 @@ impl EndpointsConfig {
     /// `pub`: the pager resolves the voice STT base through this same path.
     pub fn from_config_value(config: &toml::Value) -> Self {
         let default = Self::default();
-        let external_otel_master_switch = default.external_otel_master_switch;
         let mut base = match toml::Value::try_from(default) {
             Ok(v) => v,
             Err(_) => return Self::default(),
@@ -303,16 +232,15 @@ impl EndpointsConfig {
             crate::config::deep_merge_toml(&mut base, endpoints);
         }
         let mut resolved: Self = base.try_into().unwrap_or_default();
-        resolved.external_otel_master_switch = external_otel_master_switch;
         resolved
     }
-    /// The cli-chat-proxy base URL through which all auxiliary services (and
-    /// OAuth/session inference) resolve: explicit `cli_chat_proxy_base_url`, else
-    /// the public default. NEVER falls back to `xai_api_base_url` — that is the
-    /// inference endpoint (API-key auth) only.
+    /// The first-party API base URL through which inference and every auxiliary
+    /// service resolve: explicit `cli_chat_proxy_base_url`, else the compiled
+    /// default. Upstream pointed this at a separate vendor-operated CLI proxy;
+    /// this fork has one endpoint, so it and `xai_api_base_url` share a default.
     pub fn proxy_url(&self) -> String {
         blank_as_unset(&self.cli_chat_proxy_base_url)
-            .unwrap_or_else(|| CLI_CHAT_PROXY_BASE_URL_DEFAULT.to_owned())
+            .unwrap_or_else(|| API_BASE_URL_DEFAULT.to_owned())
     }
     pub fn resolve_inference_base_url(&self) -> String {
         self.models_base_url
@@ -339,99 +267,6 @@ impl EndpointsConfig {
                 self.proxy_url().trim_end_matches('/')
             )
         })
-    }
-    /// INTERNAL OTLP traces endpoint. Precedence:
-    /// 1. `grok_internal_otlp_traces_endpoint` (verbatim)
-    /// 2. legacy `otel_exporter_otlp_traces_endpoint` (verbatim) >
-    ///    `otel_exporter_otlp_endpoint` + `/v1/traces` — ONLY when the
-    ///    external-OTEL master switch is unset (back-compat; deprecated)
-    /// 3. `proxy_url` + `/traces`.
-    /// Uses the proxy default (not the `xai_api_base_url` fallback) so
-    /// telemetry reports to xAI even when inference is overridden. When the
-    /// master switch IS set, the standard `OTEL_EXPORTER_OTLP_*` values are
-    /// completely ignored here so the internally-authed firehose never lands
-    /// at an external collector.
-    pub fn resolve_otlp_traces_endpoint(&self) -> String {
-        if let Some(full) = blank_as_unset(&self.grok_internal_otlp_traces_endpoint) {
-            return full.trim_end_matches('/').to_string();
-        }
-        if !self.external_otel_master_switch
-            && let Some(legacy) = self.legacy_internal_otlp_traces_endpoint()
-        {
-            tracing::warn!(
-                "Repointing the internal trace pipeline via OTEL_EXPORTER_OTLP_ENDPOINT / \
-                 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is deprecated; use \
-                 GROK_INTERNAL_OTLP_TRACES_ENDPOINT instead — the standard OTEL_* vars will \
-                 route the external OTEL stream only in a future release"
-            );
-            return legacy;
-        }
-        format!("{}/traces", self.proxy_url().trim_end_matches('/'))
-    }
-    /// Legacy (standard-OTEL-var) internal traces endpoint, if any:
-    /// `otel_exporter_otlp_traces_endpoint` verbatim, else
-    /// `otel_exporter_otlp_endpoint` + `/v1/traces`. Ignores the master switch.
-    fn legacy_internal_otlp_traces_endpoint(&self) -> Option<String> {
-        if let Some(full) = blank_as_unset(&self.otel_exporter_otlp_traces_endpoint) {
-            return Some(full.trim_end_matches('/').to_string());
-        }
-        blank_as_unset(&self.otel_exporter_otlp_endpoint)
-            .map(|base| format!("{}/v1/traces", base.trim_end_matches('/')))
-    }
-    /// Extra headers for the INTERNAL export: `grok_internal_otlp_headers`
-    /// first; legacy fallback to `otel_exporter_otlp_headers` ONLY when the
-    /// external-OTEL master switch is unset (back-compat for existing users).
-    pub fn resolve_otlp_headers(&self) -> Vec<(String, String)> {
-        if let Some(headers) = blank_as_unset(&self.grok_internal_otlp_headers) {
-            return parse_otlp_header_list(&headers);
-        }
-        if !self.external_otel_master_switch {
-            return parse_otlp_header_list(
-                self.otel_exporter_otlp_headers.as_deref().unwrap_or(""),
-            );
-        }
-        Vec::new()
-    }
-    /// Whether the legacy fallback actually supplied the internal endpoint OR
-    /// internal headers from the standard `OTEL_EXPORTER_OTLP_*` vars — i.e.
-    /// the master switch is unset AND (`otel_exporter_otlp_traces_endpoint` /
-    /// `otel_exporter_otlp_endpoint` is non-blank for the endpoint, or
-    /// `otel_exporter_otlp_headers` is non-blank for headers) AND no
-    /// `grok_internal_otlp_*` override shadowed that half.
-    ///
-    /// CONTRACT: this flag is passed to the external OTEL stream's init, which
-    /// MUST refuse to activate when it is true — the same standard vars cannot
-    /// feed both pipelines (no-double-send invariant, enforced in code).
-    pub fn internal_otlp_consumed_standard_vars(&self) -> bool {
-        if self.external_otel_master_switch {
-            return false;
-        }
-        let endpoint_consumed = blank_as_unset(&self.grok_internal_otlp_traces_endpoint).is_none()
-            && self.legacy_internal_otlp_traces_endpoint().is_some();
-        let headers_consumed = blank_as_unset(&self.grok_internal_otlp_headers).is_none()
-            && blank_as_unset(&self.otel_exporter_otlp_headers).is_some();
-        endpoint_consumed || headers_consumed
-    }
-    /// Trace export enabled unless `OTEL_TRACES_EXPORTER=none`. Deliberately
-    /// still honored by the internal pipeline even with `GROK_EXTERNAL_OTEL`
-    /// set: disabling internal span export is the safe direction.
-    pub fn resolve_traces_export_enabled(&self) -> bool {
-        !matches!(
-            self.otel_traces_exporter.as_deref().map(str::trim),
-            Some("none")
-        )
-    }
-    /// `OTEL_BSP_SCHEDULE_DELAY` / `OTEL_TRACES_EXPORT_INTERVAL` — tuning-only,
-    /// deliberately shared between the internal and external pipelines.
-    pub fn resolve_otlp_export_interval(&self) -> Option<std::time::Duration> {
-        self.otel_traces_export_interval
-            .map(std::time::Duration::from_millis)
-    }
-    /// `OTEL_EXPORTER_OTLP_TIMEOUT` — tuning-only, deliberately shared between
-    /// the internal and external pipelines.
-    pub fn resolve_otlp_timeout(&self) -> Option<std::time::Duration> {
-        self.otel_exporter_otlp_timeout
-            .map(std::time::Duration::from_millis)
     }
     /// Resolve trace upload credentials: inline > file > `None` (ambient).
     pub fn resolve_trace_credentials(&self) -> Option<String> {
@@ -463,22 +298,6 @@ impl EndpointsConfig {
         let bucket_url = self.trace_upload_bucket.as_deref()?.trim();
         if bucket_url.is_empty() {
             return None;
-        }
-        if let Some(bucket_name) = bucket_url
-            .strip_prefix("s3://")
-            .map(|s| s.trim_end_matches('/'))
-        {
-            let region = self
-                .trace_upload_region
-                .clone()
-                .unwrap_or_else(|| "us-east-1".to_owned());
-            return Some(crate::session::repo_changes::UploadMethod::S3 {
-                bucket: bucket_name.to_owned(),
-                region,
-                credentials_file: None,
-                credentials_content: self.resolve_trace_credentials(),
-                endpoint_url: self.trace_upload_endpoint_url.clone(),
-            });
         }
         if bucket_url.starts_with("gs://") {
             return Some(crate::session::repo_changes::UploadMethod::Direct {
@@ -550,7 +369,7 @@ impl Default for EndpointsConfig {
         Self {
             cli_chat_proxy_base_url: std::env::var("GROK_CLI_CHAT_PROXY_BASE_URL").ok(),
             xai_api_base_url: std::env::var("GROK_XAI_API_BASE_URL")
-                .unwrap_or_else(|_| XAI_API_BASE_URL_DEFAULT.to_owned()),
+                .unwrap_or_else(|_| API_BASE_URL_DEFAULT.to_owned()),
             alpha_test_key: None,
             models_base_url: env_string("GROK_MODELS_BASE_URL"),
             models_list_url: env_string("GROK_MODELS_LIST_URL"),
@@ -563,19 +382,6 @@ impl Default for EndpointsConfig {
             trace_upload_endpoint_url: env_string("GROK_TRACE_UPLOAD_ENDPOINT_URL"),
             deployment_key: env_string("GROK_DEPLOYMENT_KEY"),
             managed_config_url: env_string("GROK_MANAGED_CONFIG_URL"),
-            otel_exporter_otlp_endpoint: env_string("OTEL_EXPORTER_OTLP_ENDPOINT"),
-            otel_exporter_otlp_traces_endpoint: env_string("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),
-            otel_exporter_otlp_headers: env_string("OTEL_EXPORTER_OTLP_HEADERS"),
-            grok_internal_otlp_traces_endpoint: env_string("GROK_INTERNAL_OTLP_TRACES_ENDPOINT"),
-            grok_internal_otlp_headers: env_string("GROK_INTERNAL_OTLP_HEADERS"),
-            external_otel_master_switch: external_otel_master_switch_resolved(),
-            otel_traces_exporter: env_string("OTEL_TRACES_EXPORTER"),
-            otel_traces_export_interval: env_string("OTEL_BSP_SCHEDULE_DELAY")
-                .or_else(|| env_string("OTEL_TRACES_EXPORT_INTERVAL"))
-                .and_then(|s| s.parse().ok()),
-            otel_exporter_otlp_timeout: env_string("OTEL_EXPORTER_OTLP_TIMEOUT")
-                .and_then(|s| s.parse().ok()),
-            asset_server_url: default_asset_server_url(),
             management_api_key: None,
             gcs_service_account_key: None,
         }
@@ -676,8 +482,6 @@ pub(crate) const FIRST_PARTY_CREDENTIAL_ENV_VARS: &[&str] = &[
     "GROK_DEPLOYMENT_KEY",
     "GROK_EXTRA_AUTH_KEY",
     "GROK_TRACE_UPLOAD_CREDENTIALS_FILE",
-    "OTEL_EXPORTER_OTLP_HEADERS",
-    "GROK_INTERNAL_OTLP_HEADERS",
 ];
 /// Read an env var as a trimmed string. Returns `None` if unset or empty/whitespace-only.
 pub(crate) fn env_string(name: &str) -> Option<String> {
@@ -1595,12 +1399,6 @@ pub struct Config {
     /// Resolved by [`crate::config::ToolsConfig::resolve`].
     #[serde(skip)]
     pub disable_zdr_incompatible_tools: bool,
-    /// S3 config for ZDR video output (presigned upload to team bucket).
-    /// Only used when `disable_zdr_incompatible_tools` is `true` and the
-    /// config is valid. Resolved by [`crate::config::ToolsConfig::resolve`].
-    #[serde(skip)]
-    pub zdr_video_output_s3:
-        Option<xai_grok_tools::implementations::grok_build::video_gen::ZdrVideoOutputS3Config>,
     /// Whether to enrich path-not-found errors with CWD reminders,
     /// "dropped repo folder" correction, and similar-name suggestions.
     /// Default `false`. Enabled via remote settings.
@@ -1872,7 +1670,6 @@ impl Default for Config {
             laziness_debug_log: None,
             respect_gitignore: false,
             disable_zdr_incompatible_tools: false,
-            zdr_video_output_s3: None,
             path_not_found_hints: false,
             cli_experimental_memory: false,
             cli_no_memory: false,
@@ -2196,7 +1993,6 @@ impl Config {
             None => tools.respect_gitignore,
         };
         self.disable_zdr_incompatible_tools = tools.disable_zdr_incompatible_tools;
-        self.zdr_video_output_s3 = tools.zdr_video_output_s3;
         let mcps = crate::config::ManagedMcpsConfig::resolve(
             ctx.raw_config,
             ctx.remote_settings,
@@ -2564,20 +2360,10 @@ impl Config {
     }
     /// `image_gen` (+ `/imagine`). Default on.
     ///
-    /// `imagine_tools_disabled` is a remote force-off (env/config cannot
-    /// re-enable). Otherwise: requirement > env > `[features]` > remote >
-    /// default.
+    /// Precedence: requirement > env > `[features]` > remote > default.
     pub(crate) fn resolve_image_gen(&self) -> Resolved<bool> {
-        use xai_grok_tools::implementations::grok_build::IMAGE_GEN_TOOL_NAME;
         if let Some(pinned) = self.requirements.image_gen.pinned() {
             return Resolved::new(pinned, ConfigSource::Requirement);
-        }
-        if self
-            .remote_settings
-            .as_ref()
-            .is_some_and(|s| s.imagine_tool_disabled(IMAGE_GEN_TOOL_NAME))
-        {
-            return Resolved::new(false, ConfigSource::Remote);
         }
         BoolFlag::env("GROK_IMAGE_GEN")
             .config(self.features.image_gen)
@@ -2589,39 +2375,21 @@ impl Config {
             .default(true)
             .resolve()
     }
-    /// `image_edit` tool gate. Same denylist / requirement pattern as
+    /// `image_edit` tool gate. Same requirement pattern as
     /// [`Self::resolve_image_gen`]; no `[features]` key (defaults on).
     pub(crate) fn resolve_image_edit(&self) -> Resolved<bool> {
-        use xai_grok_tools::implementations::grok_build::IMAGE_EDIT_TOOL_NAME;
         if let Some(pinned) = self.requirements.image_edit.pinned() {
             return Resolved::new(pinned, ConfigSource::Requirement);
-        }
-        if self
-            .remote_settings
-            .as_ref()
-            .is_some_and(|s| s.imagine_tool_disabled(IMAGE_EDIT_TOOL_NAME))
-        {
-            return Resolved::new(false, ConfigSource::Remote);
         }
         BoolFlag::env("GROK_IMAGE_EDIT").default(true).resolve()
     }
     /// `image_to_video` / `reference_to_video` (+ `/imagine-video`). Default on.
     ///
-    /// Registered as a pair; denylisting either tool name (or `video_gen`)
-    /// disables both. Otherwise same precedence as [`Self::resolve_image_gen`].
+    /// Registered as a pair: both video tools share this gate.
+    /// Same precedence as [`Self::resolve_image_gen`].
     pub(crate) fn resolve_video_gen(&self) -> Resolved<bool> {
-        use xai_grok_tools::implementations::grok_build::{
-            IMAGE_TO_VIDEO_TOOL_NAME, REFERENCE_TO_VIDEO_TOOL_NAME,
-        };
         if let Some(pinned) = self.requirements.video_gen.pinned() {
             return Resolved::new(pinned, ConfigSource::Requirement);
-        }
-        if self.remote_settings.as_ref().is_some_and(|s| {
-            s.imagine_tool_disabled(IMAGE_TO_VIDEO_TOOL_NAME)
-                || s.imagine_tool_disabled(REFERENCE_TO_VIDEO_TOOL_NAME)
-                || s.imagine_tool_disabled("video_gen")
-        }) {
-            return Resolved::new(false, ConfigSource::Remote);
         }
         BoolFlag::env("GROK_VIDEO_GEN")
             .config(self.features.video_gen)
@@ -2637,7 +2405,7 @@ impl Config {
     /// `image_gen` calls this model slug instead of the default quality model.
     /// Precedence: env `GROK_IMAGE_GEN_MODEL_OVERRIDE` > `[features]
     /// image_gen_model_override` config > remote settings `image_gen_model_override`.
-    /// `None` → default model (`grok-imagine-image-quality`).
+    /// `None` → default model (`emu-image-quality`).
     pub(crate) fn resolve_image_gen_model_override(&self) -> Option<String> {
         resolve_string_flag(
             None,
@@ -3277,16 +3045,6 @@ pub fn is_telemetry_disabled_sync() -> bool {
         .enable_env(grok_telemetry_env_enabled)
         .resolve()
 }
-/// Like [`is_telemetry_disabled_sync`] but only `true` when telemetry is
-/// *explicitly* off; absence is not disabled (`.default(true)`) so remote-only
-/// enablement still builds the OTLP exporter (the runtime gate then governs it).
-pub fn is_telemetry_explicitly_disabled_sync() -> bool {
-    !SyncBoolFlag::new(telemetry_enabled_from_toml)
-        .disable_env("DISABLE_TELEMETRY")
-        .enable_env(grok_telemetry_env_enabled)
-        .default(true)
-        .resolve()
-}
 /// Sync sibling of [`is_telemetry_disabled_sync`] scoped to Sentry. Inherits
 /// from telemetry when no Sentry-specific signal is set.
 pub fn is_error_reporting_disabled_sync() -> bool {
@@ -3326,138 +3084,6 @@ pub(crate) fn read_requirements_toml() -> Option<toml::Value> {
     let content = std::fs::read_to_string(&path).ok()?;
     toml::from_str(&content).ok()
 }
-/// Resolve the external-OTEL master switch exactly the way the external
-/// stream's activation does: **requirement pin > `GROK_EXTERNAL_OTEL` env >
-/// `[telemetry].otel_enabled` config layer (managed config included) > off**.
-///
-/// The internal trace pipeline keys its "ignore `OTEL_EXPORTER_OTLP_*`"
-/// behavior off this value ([`EndpointsConfig::external_otel_master_switch`]),
-/// so an org enable distributed via managed config / requirements (no env
-/// var) flips **both** sides together. A desync here would leave the
-/// internally-authed firehose honoring legacy `OTEL_*` repointing while
-/// `internal_pipeline_consumed_otel_vars` simultaneously blocks the external
-/// stream — exactly the split this design forbids.
-pub(crate) fn external_otel_master_switch_resolved() -> bool {
-    external_otel_master_switch_from(
-        xai_grok_config::load_merged_requirements().as_ref(),
-        env_bool("GROK_EXTERNAL_OTEL"),
-        crate::config::load_effective_config().ok().as_ref(),
-    )
-}
-/// Testable core of [`external_otel_master_switch_resolved`].
-pub(crate) fn external_otel_master_switch_from(
-    requirements: Option<&toml::Value>,
-    env_switch: Option<bool>,
-    effective_config: Option<&toml::Value>,
-) -> bool {
-    let table_enabled = |v: Option<&toml::Value>| -> Option<bool> {
-        v?.get("telemetry")?.get("otel_enabled")?.as_bool()
-    };
-    if let Some(pinned) = table_enabled(requirements) {
-        return pinned;
-    }
-    if let Some(env) = env_switch {
-        return env;
-    }
-    table_enabled(effective_config).unwrap_or(false)
-}
-/// Resolve the external OTEL stream configuration at process startup
-/// (env + local config only — remote settings are not yet available when
-/// tracing init runs).
-///
-/// Layering follows `resolve_telemetry_mode`: **requirement > env > config >
-/// remote > default**, where the `[telemetry]` `otel_*` keys from the
-/// effective config (which already includes managed-config layers distributed
-/// by `grok setup`) sit under the env vars, requirements pins are applied on
-/// top, and the remote layer is restrictive-only + asynchronous
-/// ([`apply_external_otel_remote_policy`]).
-pub fn resolve_external_otel_config(
-    client: xai_grok_telemetry::external::config::ExternalClientInfo,
-) -> Option<xai_grok_telemetry::external::ExternalOtelConfig> {
-    resolve_external_otel_config_with(
-        crate::config::load_effective_config().ok().as_ref(),
-        xai_grok_config::load_merged_requirements().as_ref(),
-        |name| std::env::var(name).ok(),
-        client,
-        EndpointsConfig::default().internal_otlp_consumed_standard_vars(),
-    )
-}
-/// Testable core of [`resolve_external_otel_config`]: all inputs injected so
-/// tests don't race on process env / disk.
-pub(crate) fn resolve_external_otel_config_with(
-    effective_config: Option<&toml::Value>,
-    requirements: Option<&toml::Value>,
-    getenv: impl Fn(&str) -> Option<String>,
-    client: xai_grok_telemetry::external::config::ExternalClientInfo,
-    internal_pipeline_consumed_otel_vars: bool,
-) -> Option<xai_grok_telemetry::external::ExternalOtelConfig> {
-    let file_cfg: Option<xai_grok_telemetry::external::ExternalOtelFileConfig> = effective_config
-        .and_then(|cfg| cfg.get("telemetry"))
-        .map(|t| xai_grok_telemetry::external::ExternalOtelFileConfig {
-            enabled: t.get("otel_enabled").and_then(toml::Value::as_bool),
-            metrics_exporter: t
-                .get("otel_metrics_exporter")
-                .and_then(toml::Value::as_str)
-                .map(str::to_owned),
-            logs_exporter: t
-                .get("otel_logs_exporter")
-                .and_then(toml::Value::as_str)
-                .map(str::to_owned),
-            endpoint: t
-                .get("otel_endpoint")
-                .and_then(toml::Value::as_str)
-                .map(str::to_owned),
-            protocol: t
-                .get("otel_protocol")
-                .or_else(|| t.get("otel_transport"))
-                .and_then(toml::Value::as_str)
-                .map(str::to_owned),
-            log_user_prompts: t
-                .get("otel_log_user_prompts")
-                .and_then(toml::Value::as_bool),
-            log_tool_details: t
-                .get("otel_log_tool_details")
-                .and_then(toml::Value::as_bool),
-        });
-    let req_get =
-        |key: &str| -> Option<bool> { requirements?.get("telemetry")?.get(key)?.as_bool() };
-    let req_enabled = req_get("otel_enabled");
-    let req_prompts = req_get("otel_log_user_prompts");
-    let req_details = req_get("otel_log_tool_details");
-    let getenv_pinned = |name: &str| -> Option<String> {
-        let pin = match name {
-            xai_grok_telemetry::external::config::ENV_MASTER_SWITCH => req_enabled,
-            "OTEL_LOG_USER_PROMPTS" => req_prompts,
-            "OTEL_LOG_TOOL_DETAILS" => req_details,
-            _ => None,
-        };
-        if let Some(v) = pin {
-            return Some(if v { "1" } else { "0" }.to_owned());
-        }
-        getenv(name)
-    };
-    let mut resolved = xai_grok_telemetry::external::ExternalOtelConfig::resolve_with(
-        getenv_pinned,
-        file_cfg.as_ref(),
-    )?;
-    resolved.client = client;
-    resolved.internal_pipeline_consumed_otel_vars = internal_pipeline_consumed_otel_vars;
-    Some(resolved)
-}
-/// Apply the restrictive-only remote-settings policy for the external OTEL
-/// stream (fleet kill switch + content-gate lock). Tighten-only by
-/// construction — there is no remote enable direction — so it is safe to
-/// call on every settings refresh.
-pub fn apply_external_otel_remote_policy(settings: Option<&crate::util::config::RemoteSettings>) {
-    let Some(settings) = settings else { return };
-    let policy = xai_grok_telemetry::external::ExternalOtelRemotePolicy {
-        force_disable: settings.external_otel_disabled.unwrap_or(false),
-        lock_content_gates: settings.external_otel_content_gates_locked.unwrap_or(false),
-    };
-    if policy.force_disable || policy.lock_content_gates {
-        xai_grok_telemetry::external::apply_remote_policy(policy);
-    }
-}
 /// Seed free-function remote caches after writing `Config.remote_settings`.
 pub fn apply_remote_settings_side_effects(settings: Option<&crate::util::config::RemoteSettings>) {
     crate::util::config::cache_remote_mcp_startup_timeout_secs(
@@ -3473,7 +3099,6 @@ pub fn apply_remote_settings_side_effects(settings: Option<&crate::util::config:
     crate::util::config::cache_remote_crash_handler_enabled(
         settings.and_then(|s| s.crash_handler_enabled),
     );
-    apply_external_otel_remote_policy(settings);
 }
 /// Read `env.<key>` from Claude-compat `managed_settings.json`. `Some(true)`
 /// indicates a force-off signal from a Mac-MDM-style admin policy.
@@ -3555,11 +3180,11 @@ pub fn resolve_model_list(
         });
         let effective = with_provider.as_ref().unwrap_or(model_override);
         let mut entry = effective.apply(key, base, &cfg.endpoints);
-        let session_bearer_unsafe = !crate::util::is_xai_api_bearer_url(&entry.info.base_url)
+        let session_bearer_unsafe = !crate::util::is_first_party_bearer_url(&entry.info.base_url)
             || entry
                 .api_base_url
                 .as_deref()
-                .is_some_and(|url| !crate::util::is_xai_api_bearer_url(url));
+                .is_some_and(|url| !crate::util::is_first_party_bearer_url(url));
         if let Some(pid) = model_override.model_provider.as_deref()
             && entry.auth_provider.is_none()
             && session_bearer_unsafe
@@ -4148,7 +3773,7 @@ pub struct ModelInfo {
     pub id: Option<String>,
     /// The routing slug sent in API requests.
     pub model: String,
-    /// The base URL of the model (session endpoint). e.g. "https://cli-chat-proxy.grok.com/v1"
+    /// The base URL of the model (session endpoint). e.g. "https://api.meta.ai/v1"
     pub base_url: String,
     /// Human-readable name of the model. Honored by both the picker
     /// (`/model`) and `/session-info` -- when set, that's the label shown
@@ -4621,7 +4246,7 @@ pub struct Features {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub video_gen: Option<bool>,
     /// `image_gen` Imagine model override. `None`/empty = defer to remote settings
-    /// (`image_gen_model_override`) / env / default (`grok-imagine-image-quality`).
+    /// (`image_gen_model_override`) / env / default (`emu-image-quality`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_gen_model_override: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4831,7 +4456,7 @@ pub fn enforce_disable_api_key_auth(
 ) {
     if disable_api_key_auth
         && creds.auth_type == xai_chat_state::AuthType::ApiKey
-        && crate::util::is_xai_api_url(&creds.base_url)
+        && crate::util::is_first_party_api_url(&creds.base_url)
     {
         creds.auth_type = xai_chat_state::AuthType::SessionToken;
         creds.api_key = session_key.map(str::to_owned);
@@ -5068,7 +4693,7 @@ pub fn stamp_session_local_sampler_fields(
 ) {
     cfg.client_identifier = client_identifier;
     cfg.attribution_callback = active_session_config.attribution_callback.clone();
-    if crate::util::is_xai_api_bearer_url(&cfg.base_url) {
+    if crate::util::is_first_party_bearer_url(&cfg.base_url) {
         cfg.bearer_resolver = active_session_config.bearer_resolver.clone();
     }
     cfg.max_retries = max_retries;
@@ -5175,11 +4800,10 @@ pub fn sampling_config_for_model(
 /// URL-derived header logic at the shell boundary so callers downstream see a
 /// single homogenous header bag.
 ///
-/// * cli-chat-proxy bases get `X-XAI-Token-Auth` and
-///   `x-authenticateresponse` headers (mirrors the inline match in the legacy
-///   `sampling::Client::new` on `is_cli_chat_proxy_url`).
-/// * With the optional non-production feature, matching first-party hosts may
-///   get an extra access header from the corresponding key argument.
+/// First-party bases get the client-mode header. The vendor-proprietary
+/// `X-XAI-Token-Auth` / `x-authenticateresponse` pair that upstream sent to its
+/// CLI proxy is gone: this fork speaks plain OpenAI wire format, where those
+/// headers are at best ignored and at worst a fingerprint.
 ///
 /// Existing entries are never overwritten so callers can pre-set a value.
 pub fn inject_url_derived_headers(
@@ -5187,13 +4811,7 @@ pub fn inject_url_derived_headers(
     alpha_test_key: Option<&str>,
     base_url: &str,
 ) {
-    if crate::util::is_cli_chat_proxy_url(base_url) {
-        headers
-            .entry("X-XAI-Token-Auth".to_string())
-            .or_insert_with(|| "xai-grok-cli".to_string());
-        headers
-            .entry("x-authenticateresponse".to_string())
-            .or_insert_with(|| "authenticate-response".to_string());
+    if crate::util::serves_first_party_api_extensions(base_url) {
         headers
             .entry(crate::http::CLIENT_MODE_HEADER.to_string())
             .or_insert_with(|| crate::http::process_client_mode().to_string());
@@ -5600,46 +5218,48 @@ reasoning_effort = "low"
         }
     }
     #[test]
-    fn inject_url_derived_headers_adds_proxy_headers_for_cli_chat_proxy_url() {
+    fn inject_url_derived_headers_adds_client_mode_for_first_party_url() {
         let mut headers = IndexMap::new();
-        inject_url_derived_headers(&mut headers, None, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL);
+        inject_url_derived_headers(&mut headers, None, crate::env::PROD_API_BASE_URL);
         assert_eq!(
-            headers.get("X-XAI-Token-Auth").map(String::as_str),
-            Some("xai-grok-cli")
+            headers
+                .get(crate::http::CLIENT_MODE_HEADER)
+                .map(String::as_str),
+            Some(crate::http::process_client_mode())
         );
-        assert_eq!(
-            headers.get("x-authenticateresponse").map(String::as_str),
-            Some("authenticate-response")
-        );
-    }
-    #[test]
-    fn inject_url_derived_headers_skips_proxy_headers_for_external_url() {
-        let mut headers = IndexMap::new();
-        inject_url_derived_headers(&mut headers, None, "https://api.x.ai/v1");
+        // The vendor-proprietary proxy pair must never come back.
         assert!(headers.get("X-XAI-Token-Auth").is_none());
         assert!(headers.get("x-authenticateresponse").is_none());
+    }
+    #[test]
+    fn inject_url_derived_headers_skips_client_mode_for_third_party_url() {
+        let mut headers = IndexMap::new();
+        inject_url_derived_headers(&mut headers, None, "https://api.openai.com/v1");
+        assert!(headers.get(crate::http::CLIENT_MODE_HEADER).is_none());
     }
     #[test]
     fn inject_url_derived_headers_preserves_caller_extra_headers() {
         let mut headers = IndexMap::new();
         headers.insert("x-custom-byok".to_string(), "value".to_string());
-        inject_url_derived_headers(&mut headers, None, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL);
+        inject_url_derived_headers(&mut headers, None, crate::env::PROD_API_BASE_URL);
         assert_eq!(
             headers.get("x-custom-byok").map(String::as_str),
             Some("value")
         );
-        assert_eq!(
-            headers.get("X-XAI-Token-Auth").map(String::as_str),
-            Some("xai-grok-cli")
-        );
+        assert!(headers.contains_key(crate::http::CLIENT_MODE_HEADER));
     }
     #[test]
     fn inject_url_derived_headers_does_not_overwrite_existing_entries() {
         let mut headers = IndexMap::new();
-        headers.insert("X-XAI-Token-Auth".to_string(), "caller-set".to_string());
-        inject_url_derived_headers(&mut headers, None, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL);
+        headers.insert(
+            crate::http::CLIENT_MODE_HEADER.to_string(),
+            "caller-set".to_string(),
+        );
+        inject_url_derived_headers(&mut headers, None, crate::env::PROD_API_BASE_URL);
         assert_eq!(
-            headers.get("X-XAI-Token-Auth").map(String::as_str),
+            headers
+                .get(crate::http::CLIENT_MODE_HEADER)
+                .map(String::as_str),
             Some("caller-set"),
         );
     }
@@ -6136,7 +5756,7 @@ reasoning_effort = "low"
             "ws-model".to_string(),
             test_model_entry(
                 "ws-model",
-                "https://api.x.ai/v1",
+                "https://api.meta.ai/v1",
                 Some("first-party-key"),
                 None,
                 None,
@@ -6525,7 +6145,7 @@ reasoning_effort = "low"
             assert_eq!(
                 session_creds.base_url,
                 endpoints.proxy_url(),
-                "{model_id}: SessionToken must route to cli-chat-proxy"
+                "{model_id}: SessionToken must route to the first-party API"
             );
             let api_key_creds = ResolvedCredentials {
                 api_key: Some("key".into()),
@@ -6538,7 +6158,7 @@ reasoning_effort = "low"
             };
             assert_eq!(
                 api_key_creds.base_url, endpoints.xai_api_base_url,
-                "{model_id}: ExternalApiKey must route to api.x.ai"
+                "{model_id}: ExternalApiKey must route to the configured inference endpoint"
             );
         }
     }
@@ -6777,13 +6397,8 @@ reasoning_effort = "low"
     }
     #[test]
     fn proxy_messages_models_use_bearer_auth_scheme() {
-        let mut model = test_model_entry(
-            "grok-4.5",
-            crate::env::PROD_CLI_CHAT_PROXY_BASE_URL,
-            None,
-            None,
-            None,
-        );
+        let mut model =
+            test_model_entry("grok-4.5", crate::env::PROD_API_BASE_URL, None, None, None);
         model.info.api_backend = ApiBackend::Messages;
         let config = sampling_config_for_model(
             &model,
@@ -6796,13 +6411,12 @@ reasoning_effort = "low"
         assert_eq!(config.api_backend, ApiBackend::Messages);
         assert_eq!(config.auth_scheme, AuthScheme::Bearer);
         assert_eq!(config.api_key, Some("tok".to_string()));
-        assert_eq!(config.base_url, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL);
-        assert_eq!(
+        assert_eq!(config.base_url, crate::env::PROD_API_BASE_URL);
+        assert!(
             config
                 .extra_headers
-                .get("X-XAI-Token-Auth")
-                .map(String::as_str),
-            Some("xai-grok-cli")
+                .contains_key(crate::http::CLIENT_MODE_HEADER),
+            "a first-party base URL still gets the client-mode header"
         );
     }
     /// Regression: without a session key, `resolve_credentials` falls through
@@ -6826,15 +6440,15 @@ reasoning_effort = "low"
     #[test]
     fn enforce_disable_api_key_auth_blocks_first_party_only() {
         use xai_chat_state::AuthType;
-        let mut creds = api_key_creds("https://api.x.ai/v1");
+        let mut creds = api_key_creds("https://api.meta.ai/v1");
         enforce_disable_api_key_auth(&mut creds, false, Some("session-jwt"));
         assert_eq!(creds.auth_type, AuthType::ApiKey);
         assert_eq!(creds.api_key.as_deref(), Some("xai-secret"));
-        let mut creds = api_key_creds("https://api.x.ai/v1");
+        let mut creds = api_key_creds("https://api.meta.ai/v1");
         enforce_disable_api_key_auth(&mut creds, true, Some("session-jwt"));
         assert_eq!(creds.auth_type, AuthType::SessionToken);
         assert_eq!(creds.api_key.as_deref(), Some("session-jwt"));
-        let mut creds = api_key_creds("https://api.x.ai/v1");
+        let mut creds = api_key_creds("https://api.meta.ai/v1");
         enforce_disable_api_key_auth(&mut creds, true, None);
         assert_eq!(creds.auth_type, AuthType::SessionToken);
         assert_eq!(creds.api_key, None);
@@ -6844,7 +6458,7 @@ reasoning_effort = "low"
         assert_eq!(creds.api_key.as_deref(), Some("xai-secret"));
         let mut creds = ResolvedCredentials {
             auth_type: AuthType::SessionToken,
-            ..api_key_creds("https://api.x.ai/v1")
+            ..api_key_creds("https://api.meta.ai/v1")
         };
         enforce_disable_api_key_auth(&mut creds, true, Some("session-jwt"));
         assert_eq!(creds.auth_type, AuthType::SessionToken);
@@ -6853,15 +6467,15 @@ reasoning_effort = "low"
     /// with its own api_key resolves to `ApiKey` (priority 1, beating the
     /// session), and the kill switch — now applied inside
     /// `try_resolve_model_credentials` — swaps it for the session token. BYOK
-    /// (non-x.ai) own keys are preserved. (`try_resolve_model_credentials`
+    /// (third-party) own keys are preserved. (`try_resolve_model_credentials`
     /// loads global config, so this exercises its resolve + enforce core.)
     #[test]
     fn try_resolve_model_credentials_swaps_first_party_own_key_under_kill_switch() {
         use xai_chat_state::AuthType;
         let entry = test_model_entry(
             "m",
-            "https://api.x.ai/v1",
-            Some("xai-model-key"),
+            "https://api.meta.ai/v1",
+            Some("first-party-model-key"),
             None,
             None,
         );
@@ -6871,7 +6485,7 @@ reasoning_effort = "low"
             AuthType::ApiKey,
             "own key wins over session"
         );
-        assert_eq!(creds.api_key.as_deref(), Some("xai-model-key"));
+        assert_eq!(creds.api_key.as_deref(), Some("first-party-model-key"));
         enforce_disable_api_key_auth(&mut creds, true, Some("session-jwt"));
         assert_eq!(
             creds.auth_type,
@@ -8080,65 +7694,19 @@ reasoning_effort = "low"
         let info = ModelInfo::from_config(&entry);
         assert_eq!(info.inference_idle_timeout_secs, Some(120));
     }
+    /// `[telemetry]` now carries only local on/off toggles; there is no
+    /// analytics endpoint or token to configure.
     #[test]
-    fn telemetry_config_parses_custom_values_from_toml() {
+    fn telemetry_config_parses_local_toggles_only() {
         let raw: toml::Value = toml::from_str(
             r#"
             [telemetry]
-            events_url     = "https://custom.example.com/events"
-            events_api_key = "custom-key"
-            mixpanel_token = "custom-token"
-            mixpanel_enabled = false
+            trace_upload = false
             "#,
         )
         .unwrap();
         let cfg = Config::new_from_toml_cfg(&raw).expect("should parse");
-        assert_eq!(
-            cfg.telemetry.events_url.as_deref(),
-            Some("https://custom.example.com/events")
-        );
-        assert_eq!(cfg.telemetry.events_api_key.as_deref(), Some("custom-key"));
-        assert_eq!(
-            cfg.telemetry.mixpanel_token.as_deref(),
-            Some("custom-token")
-        );
-        assert!(!cfg.telemetry.mixpanel_enabled);
-    }
-    /// Empty/whitespace values must become `None`, not reach the HTTP client as empty strings.
-    #[test]
-    fn telemetry_empty_string_disables_sink() {
-        let raw: toml::Value = toml::from_str(
-            r#"
-            [telemetry]
-            events_url     = ""
-            events_api_key = "  "
-            mixpanel_token = "\t"
-            "#,
-        )
-        .unwrap();
-        let cfg = Config::new_from_toml_cfg(&raw).expect("should parse");
-        assert!(cfg.telemetry.events_url.is_none());
-        assert!(cfg.telemetry.events_api_key.is_none());
-        assert!(cfg.telemetry.mixpanel_token.is_none());
-    }
-    #[test]
-    fn telemetry_partial_override_retains_defaults() {
-        let raw: toml::Value = toml::from_str(
-            r#"
-            [telemetry]
-            events_url = "https://my-proxy/events"
-            "#,
-        )
-        .unwrap();
-        let cfg = Config::new_from_toml_cfg(&raw).expect("should parse");
-        assert_eq!(
-            cfg.telemetry.events_url.as_deref(),
-            Some("https://my-proxy/events")
-        );
-        let defaults = TelemetryConfig::default();
-        assert_eq!(cfg.telemetry.events_api_key, defaults.events_api_key);
-        assert_eq!(cfg.telemetry.mixpanel_token, defaults.mixpanel_token);
-        assert_eq!(cfg.telemetry.mixpanel_enabled, defaults.mixpanel_enabled);
+        assert_eq!(cfg.telemetry.trace_upload, Some(false));
     }
     #[test]
     fn auth_alias_maps_to_grok_com_config() {
@@ -8348,7 +7916,10 @@ reasoning_effort = "low"
         let model = models.get(dm).expect("model should exist");
         assert_eq!(model.info.base_url, "https://my-proxy.example.com/v1");
         assert_eq!(model.api_key.as_deref(), Some("my-custom-api-key"));
-        assert!(model.env_key.is_none());
+        // The default catalog declares `env_key` for the first-party model, and
+        // a user override merges over that entry rather than replacing it — so
+        // the names survive here. What matters is precedence: an explicit
+        // `api_key` outranks any env-var lookup, asserted just below.
         let sampling = resolve_sampling(model, Some("session-token"));
         assert_eq!(
             sampling.api_key.as_deref(),
@@ -8449,7 +8020,7 @@ reasoning_effort = "low"
         let mut prefetched = IndexMap::new();
         prefetched.insert(
             dm.to_string(),
-            test_model_entry(dm, "https://cli-chat-proxy.grok.com/v1", None, None, None),
+            test_model_entry(dm, "https://api.meta.ai/v1", None, None, None),
         );
         let (_, models) = resolve_models_from_toml(
             &format!(
@@ -8607,7 +8178,7 @@ reasoning_effort = "low"
             "default-grok".to_string(),
             test_model_entry(
                 crate::models::default_model(),
-                "https://cli-chat-proxy.grok.com/v1",
+                "https://api.meta.ai/v1",
                 None,
                 None,
                 Some("https://api.x.ai/v1"),
@@ -8710,10 +8281,6 @@ reasoning_effort = "low"
             "GROK_MANAGED_CONFIG_URL",
             "GROK_MODELS_BASE_URL",
             "GROK_MODELS_LIST_URL",
-            "OTEL_EXPORTER_OTLP_ENDPOINT",
-            "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
-            "OTEL_EXPORTER_OTLP_HEADERS",
-            "GROK_INTERNAL_OTLP_TRACES_ENDPOINT",
             "GROK_INTERNAL_OTLP_HEADERS",
             "GROK_EXTERNAL_OTEL",
         ] {
@@ -8733,7 +8300,7 @@ reasoning_effort = "low"
             cli_chat_proxy_base_url: None,
             ..Default::default()
         };
-        let proxy = CLI_CHAT_PROXY_BASE_URL_DEFAULT;
+        let proxy = API_BASE_URL_DEFAULT;
         assert_eq!(cfg.proxy_url(), proxy);
         assert_eq!(cfg.resolve_inference_base_url(), proxy);
         assert_eq!(cfg.resolve_models_list_url(), format!("{proxy}/models"));
@@ -8743,10 +8310,6 @@ reasoning_effort = "low"
         );
         assert_eq!(cfg.resolve_feedback_base_url(), proxy);
         assert_eq!(cfg.resolve_trace_upload_url(), proxy);
-        assert_eq!(
-            cfg.resolve_otlp_traces_endpoint(),
-            format!("{proxy}/traces")
-        );
         assert_eq!(cfg.xai_api_base_url, inference);
         let overridden = EndpointsConfig {
             cli_chat_proxy_base_url: Some("https://proxy.enterprise.example/v1".to_string()),
@@ -8760,10 +8323,6 @@ reasoning_effort = "low"
         assert_eq!(
             overridden.proxy_url(),
             "https://proxy.enterprise.example/v1"
-        );
-        assert_eq!(
-            overridden.resolve_otlp_traces_endpoint(),
-            "https://proxy.enterprise.example/v1/traces"
         );
         assert_eq!(
             overridden.resolve_managed_config_url(),
@@ -8797,7 +8356,7 @@ reasoning_effort = "low"
         assert!(cfg.endpoints.cli_chat_proxy_base_url.is_none());
         assert_eq!(
             cfg.endpoints.resolve_managed_config_url(),
-            format!("{CLI_CHAT_PROXY_BASE_URL_DEFAULT}/deployment/config")
+            format!("{API_BASE_URL_DEFAULT}/deployment/config")
         );
         assert!(
             !cfg.endpoints
@@ -9457,13 +9016,12 @@ reasoning_effort = "low"
         };
         assert_eq!(Config::default().resolve_image_gen_model_override(), None);
         assert_eq!(
-            with(None, Some("grok-imagine-image")).resolve_image_gen_model_override(),
-            Some("grok-imagine-image".to_owned())
+            with(None, Some("emu-image")).resolve_image_gen_model_override(),
+            Some("emu-image".to_owned())
         );
         assert_eq!(
-            with(Some("grok-imagine-image-pro"), Some("grok-imagine-image"))
-                .resolve_image_gen_model_override(),
-            Some("grok-imagine-image-pro".to_owned())
+            with(Some("emu-image-pro"), Some("emu-image")).resolve_image_gen_model_override(),
+            Some("emu-image-pro".to_owned())
         );
     }
     #[test]
@@ -9483,41 +9041,21 @@ reasoning_effort = "low"
         };
         assert_eq!(Config::default().resolve_image_edit_model_override(), None);
         assert_eq!(
-            with(None, Some("grok-imagine-image")).resolve_image_edit_model_override(),
-            Some("grok-imagine-image".to_owned())
+            with(None, Some("emu-image")).resolve_image_edit_model_override(),
+            Some("emu-image".to_owned())
         );
         assert_eq!(
-            with(Some("grok-imagine-image-pro"), Some("grok-imagine-image"))
-                .resolve_image_edit_model_override(),
-            Some("grok-imagine-image-pro".to_owned())
+            with(Some("emu-image-pro"), Some("emu-image")).resolve_image_edit_model_override(),
+            Some("emu-image-pro".to_owned())
         );
         let gen_only = Config {
             remote_settings: Some(crate::util::config::RemoteSettings {
-                image_gen_model_override: Some("grok-imagine-image".to_owned()),
+                image_gen_model_override: Some("emu-image".to_owned()),
                 ..Default::default()
             }),
             ..Default::default()
         };
         assert_eq!(gen_only.resolve_image_edit_model_override(), None);
-    }
-    #[test]
-    #[serial]
-    fn imagine_tools_disabled_gates_image_edit() {
-        unsafe { std::env::remove_var("GROK_IMAGE_EDIT") };
-        let with_list = |tools: Vec<&str>| Config {
-            remote_settings: Some(crate::util::config::RemoteSettings {
-                imagine_tools_disabled: Some(tools.into_iter().map(String::from).collect()),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
-        unsafe { std::env::set_var("GROK_IMAGE_EDIT", "1") };
-        let off = with_list(vec!["image_edit"]).resolve_image_edit();
-        assert!(!off.value);
-        assert_eq!(off.source, ConfigSource::Remote);
-        unsafe { std::env::remove_var("GROK_IMAGE_EDIT") };
-        assert!(with_list(vec!["image_to_video"]).resolve_image_edit().value);
-        assert!(Config::default().resolve_image_edit().value);
     }
     #[test]
     #[serial]
@@ -9546,18 +9084,6 @@ reasoning_effort = "low"
             .resolve_image_gen()
             .value
         );
-        unsafe { std::env::set_var("GROK_IMAGE_GEN", "1") };
-        let denied = Config {
-            remote_settings: Some(crate::util::config::RemoteSettings {
-                imagine_tools_disabled: Some(vec!["image_gen".into()]),
-                ..Default::default()
-            }),
-            ..Default::default()
-        }
-        .resolve_image_gen();
-        assert!(!denied.value);
-        assert_eq!(denied.source, ConfigSource::Remote);
-        unsafe { std::env::remove_var("GROK_IMAGE_GEN") };
     }
     #[test]
     #[serial]
@@ -9579,17 +9105,6 @@ reasoning_effort = "low"
             !Config {
                 remote_settings: Some(crate::util::config::RemoteSettings {
                     video_gen_enabled: Some(false),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            }
-            .resolve_video_gen()
-            .value
-        );
-        assert!(
-            !Config {
-                remote_settings: Some(crate::util::config::RemoteSettings {
-                    imagine_tools_disabled: Some(vec!["image_to_video".into()]),
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -10617,452 +10132,6 @@ agent_type = "cursor"
             other => panic!("expected Proxy upload method, got {other:?}"),
         }
     }
-    #[test]
-    fn otlp_traces_endpoint_precedence() {
-        let proxy = "https://inference.acme.com/v1".to_string();
-        let derived = EndpointsConfig {
-            cli_chat_proxy_base_url: Some(proxy.clone()),
-            ..Default::default()
-        };
-        assert_eq!(
-            derived.resolve_otlp_traces_endpoint(),
-            "https://inference.acme.com/v1/traces"
-        );
-        let base = EndpointsConfig {
-            cli_chat_proxy_base_url: Some(proxy.clone()),
-            otel_exporter_otlp_endpoint: Some("https://otel.acme.com".to_string()),
-            ..Default::default()
-        };
-        assert_eq!(
-            base.resolve_otlp_traces_endpoint(),
-            "https://otel.acme.com/v1/traces"
-        );
-        let full = EndpointsConfig {
-            cli_chat_proxy_base_url: Some(proxy),
-            otel_exporter_otlp_endpoint: Some("https://ignored.example".to_string()),
-            otel_exporter_otlp_traces_endpoint: Some("https://otel.acme.com/v1/traces".to_string()),
-            ..Default::default()
-        };
-        assert_eq!(
-            full.resolve_otlp_traces_endpoint(),
-            "https://otel.acme.com/v1/traces"
-        );
-    }
-    #[test]
-    fn otlp_headers_parse() {
-        let cfg = EndpointsConfig {
-            otel_exporter_otlp_headers: Some("a=1, b = 2 ,=skip,c=".to_string()),
-            ..Default::default()
-        };
-        assert_eq!(
-            cfg.resolve_otlp_headers(),
-            vec![
-                ("a".to_string(), "1".to_string()),
-                ("b".to_string(), "2".to_string()),
-                ("c".to_string(), String::new()),
-            ]
-        );
-    }
-    /// Base config for the internal-OTLP tests: pinned proxy, every OTLP knob
-    /// explicitly unset so ambient env (via `Default`) can't leak in.
-    fn internal_otlp_test_config() -> EndpointsConfig {
-        EndpointsConfig {
-            cli_chat_proxy_base_url: Some("https://proxy.example/v1".to_string()),
-            otel_exporter_otlp_endpoint: None,
-            otel_exporter_otlp_traces_endpoint: None,
-            otel_exporter_otlp_headers: None,
-            grok_internal_otlp_traces_endpoint: None,
-            grok_internal_otlp_headers: None,
-            external_otel_master_switch: false,
-            ..Default::default()
-        }
-    }
-    /// `grok_internal_otlp_traces_endpoint` wins over the legacy `OTEL_*`
-    /// fields regardless of the master switch.
-    #[test]
-    fn internal_otlp_endpoint_grok_internal_wins_regardless_of_switch() {
-        for switch in [false, true] {
-            let cfg = EndpointsConfig {
-                grok_internal_otlp_traces_endpoint: Some(
-                    "https://internal.example/traces/".to_string(),
-                ),
-                otel_exporter_otlp_traces_endpoint: Some(
-                    "https://legacy.example/v1/traces".to_string(),
-                ),
-                otel_exporter_otlp_endpoint: Some("https://legacy-base.example".to_string()),
-                external_otel_master_switch: switch,
-                ..internal_otlp_test_config()
-            };
-            assert_eq!(
-                cfg.resolve_otlp_traces_endpoint(),
-                "https://internal.example/traces",
-                "switch={switch}: GROK_INTERNAL_OTLP_TRACES_ENDPOINT must win verbatim (trailing / trimmed)"
-            );
-        }
-    }
-    /// Master switch unset → legacy fallback preserved (back-compat).
-    #[test]
-    fn internal_otlp_endpoint_legacy_fallback_when_switch_unset() {
-        let traces = EndpointsConfig {
-            otel_exporter_otlp_traces_endpoint: Some(
-                "https://legacy.example/v1/traces".to_string(),
-            ),
-            ..internal_otlp_test_config()
-        };
-        assert_eq!(
-            traces.resolve_otlp_traces_endpoint(),
-            "https://legacy.example/v1/traces"
-        );
-        let base = EndpointsConfig {
-            otel_exporter_otlp_endpoint: Some("https://legacy-base.example/".to_string()),
-            ..internal_otlp_test_config()
-        };
-        assert_eq!(
-            base.resolve_otlp_traces_endpoint(),
-            "https://legacy-base.example/v1/traces"
-        );
-    }
-    /// Master switch SET → legacy `OTEL_*` endpoint/headers are completely
-    /// ignored by the internal pipeline (the external stream owns them); the
-    /// internal pipeline falls back to the proxy default and
-    /// `internal_otlp_consumed_standard_vars()` is false.
-    #[test]
-    fn internal_otlp_ignores_legacy_vars_when_switch_set() {
-        let cfg = EndpointsConfig {
-            otel_exporter_otlp_traces_endpoint: Some(
-                "https://admin-collector.example/v1/traces".to_string(),
-            ),
-            otel_exporter_otlp_endpoint: Some("https://admin-collector.example".to_string()),
-            otel_exporter_otlp_headers: Some("authorization=Bearer admin".to_string()),
-            external_otel_master_switch: true,
-            ..internal_otlp_test_config()
-        };
-        assert_eq!(
-            cfg.resolve_otlp_traces_endpoint(),
-            "https://proxy.example/v1/traces",
-            "internal firehose must never follow OTEL_* to the external collector"
-        );
-        assert_eq!(cfg.resolve_otlp_headers(), Vec::<(String, String)>::new());
-        assert!(!cfg.internal_otlp_consumed_standard_vars());
-    }
-    /// `internal_otlp_consumed_standard_vars()` truth table.
-    #[test]
-    fn internal_otlp_consumed_standard_vars_cases() {
-        struct Case {
-            switch: bool,
-            legacy_traces_ep: bool,
-            legacy_base_ep: bool,
-            legacy_headers: bool,
-            internal_ep: bool,
-            internal_headers: bool,
-            expected: bool,
-            why: &'static str,
-        }
-        let unset = Case {
-            switch: false,
-            legacy_traces_ep: false,
-            legacy_base_ep: false,
-            legacy_headers: false,
-            internal_ep: false,
-            internal_headers: false,
-            expected: false,
-            why: "nothing set",
-        };
-        let cases = [
-            Case { ..unset },
-            Case {
-                legacy_traces_ep: true,
-                expected: true,
-                why: "legacy traces endpoint consumed",
-                ..unset
-            },
-            Case {
-                legacy_base_ep: true,
-                expected: true,
-                why: "legacy base endpoint consumed",
-                ..unset
-            },
-            Case {
-                legacy_headers: true,
-                expected: true,
-                why: "legacy headers consumed",
-                ..unset
-            },
-            Case {
-                legacy_traces_ep: true,
-                internal_ep: true,
-                expected: false,
-                why: "internal endpoint shadows legacy",
-                ..unset
-            },
-            Case {
-                legacy_headers: true,
-                internal_headers: true,
-                expected: false,
-                why: "internal headers shadow legacy",
-                ..unset
-            },
-            Case {
-                legacy_traces_ep: true,
-                legacy_headers: true,
-                internal_ep: true,
-                expected: true,
-                why: "endpoint shadowed but legacy headers still consumed (headers half)",
-                ..unset
-            },
-            Case {
-                switch: true,
-                legacy_traces_ep: true,
-                legacy_base_ep: true,
-                legacy_headers: true,
-                expected: false,
-                why: "switch set: legacy vars ignored",
-                ..unset
-            },
-        ];
-        for case in cases {
-            let cfg = EndpointsConfig {
-                external_otel_master_switch: case.switch,
-                otel_exporter_otlp_traces_endpoint: case
-                    .legacy_traces_ep
-                    .then(|| "https://legacy.example/v1/traces".to_string()),
-                otel_exporter_otlp_endpoint: case
-                    .legacy_base_ep
-                    .then(|| "https://legacy-base.example".to_string()),
-                otel_exporter_otlp_headers: case.legacy_headers.then(|| "k=v".to_string()),
-                grok_internal_otlp_traces_endpoint: case
-                    .internal_ep
-                    .then(|| "https://internal.example/traces".to_string()),
-                grok_internal_otlp_headers: case.internal_headers.then(|| "ik=iv".to_string()),
-                ..internal_otlp_test_config()
-            };
-            assert_eq!(
-                cfg.internal_otlp_consumed_standard_vars(),
-                case.expected,
-                "case: {}",
-                case.why
-            );
-        }
-    }
-    /// Headers precedence: `grok_internal_otlp_headers` wins; legacy
-    /// `otel_exporter_otlp_headers` only when the master switch is unset.
-    #[test]
-    fn internal_otlp_headers_precedence() {
-        for switch in [false, true] {
-            let cfg = EndpointsConfig {
-                grok_internal_otlp_headers: Some("x-debug=1".to_string()),
-                otel_exporter_otlp_headers: Some("legacy=1".to_string()),
-                external_otel_master_switch: switch,
-                ..internal_otlp_test_config()
-            };
-            assert_eq!(
-                cfg.resolve_otlp_headers(),
-                vec![("x-debug".to_string(), "1".to_string())],
-                "switch={switch}"
-            );
-        }
-        let legacy = EndpointsConfig {
-            otel_exporter_otlp_headers: Some("legacy=1".to_string()),
-            ..internal_otlp_test_config()
-        };
-        assert_eq!(
-            legacy.resolve_otlp_headers(),
-            vec![("legacy".to_string(), "1".to_string())]
-        );
-    }
-    fn ext_env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> + use<> {
-        let map: std::collections::HashMap<String, String> = pairs
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-        move |name: &str| map.get(name).cloned()
-    }
-    fn ext_client() -> xai_grok_telemetry::external::config::ExternalClientInfo {
-        xai_grok_telemetry::external::config::ExternalClientInfo::default()
-    }
-    #[test]
-    fn external_otel_default_off_and_double_opt_in() {
-        assert!(
-            resolve_external_otel_config_with(None, None, ext_env(&[]), ext_client(), false)
-                .is_none()
-        );
-        assert!(
-            resolve_external_otel_config_with(
-                None,
-                None,
-                ext_env(&[("GROK_EXTERNAL_OTEL", "1")]),
-                ext_client(),
-                false,
-            )
-            .is_none()
-        );
-        assert!(
-            resolve_external_otel_config_with(
-                None,
-                None,
-                ext_env(&[
-                    ("GROK_EXTERNAL_OTEL", "1"),
-                    ("OTEL_METRICS_EXPORTER", "otlp"),
-                ]),
-                ext_client(),
-                false,
-            )
-            .is_some()
-        );
-    }
-    #[test]
-    fn external_otel_file_table_layered_under_env() {
-        let effective: toml::Value = toml::from_str(
-            r#"
-            [telemetry]
-            otel_enabled = true
-            otel_logs_exporter = "otlp"
-            otel_endpoint = "https://collector.corp.example:4318"
-            otel_protocol = "grpc"
-            "#,
-        )
-        .unwrap();
-        let cfg = resolve_external_otel_config_with(
-            Some(&effective),
-            None,
-            ext_env(&[]),
-            ext_client(),
-            false,
-        )
-        .expect("file table must activate");
-        assert_eq!(cfg.transport.as_protocol_str(), "grpc");
-        assert_eq!(cfg.logs_endpoint, "https://collector.corp.example:4318");
-        let cfg = resolve_external_otel_config_with(
-            Some(&effective),
-            None,
-            ext_env(&[("OTEL_EXPORTER_OTLP_PROTOCOL", "http/protobuf")]),
-            ext_client(),
-            false,
-        )
-        .expect("env protocol must override file protocol");
-        assert_eq!(cfg.transport.as_protocol_str(), "http/protobuf");
-        assert_eq!(
-            cfg.logs_endpoint,
-            "https://collector.corp.example:4318/v1/logs"
-        );
-        assert!(
-            resolve_external_otel_config_with(
-                Some(&effective),
-                None,
-                ext_env(&[("GROK_EXTERNAL_OTEL", "0")]),
-                ext_client(),
-                false,
-            )
-            .is_none()
-        );
-    }
-    #[test]
-    fn external_otel_requirements_pin_wins_over_env() {
-        let req: toml::Value = toml::from_str(
-            r#"
-            [telemetry]
-            otel_enabled = false
-            "#,
-        )
-        .unwrap();
-        assert!(
-            resolve_external_otel_config_with(
-                None,
-                Some(&req),
-                ext_env(&[("GROK_EXTERNAL_OTEL", "1"), ("OTEL_LOGS_EXPORTER", "otlp"),]),
-                ext_client(),
-                false,
-            )
-            .is_none()
-        );
-        let req: toml::Value = toml::from_str(
-            r#"
-            [telemetry]
-            otel_log_user_prompts = false
-            otel_log_tool_details = false
-            "#,
-        )
-        .unwrap();
-        let cfg = resolve_external_otel_config_with(
-            None,
-            Some(&req),
-            ext_env(&[
-                ("GROK_EXTERNAL_OTEL", "1"),
-                ("OTEL_LOGS_EXPORTER", "otlp"),
-                ("OTEL_LOG_USER_PROMPTS", "1"),
-                ("OTEL_LOG_TOOL_DETAILS", "1"),
-            ]),
-            ext_client(),
-            false,
-        )
-        .expect("stream still active; only gates pinned");
-        assert!(!cfg.gates.log_user_prompts, "requirement pin must win");
-        assert!(!cfg.gates.log_tool_details, "requirement pin must win");
-    }
-    /// Regression: an org enable via `[telemetry].otel_enabled`
-    /// (managed config / requirements — no `GROK_EXTERNAL_OTEL` env var) must
-    /// flip the master switch the *internal* pipeline keys off, so legacy
-    /// `OTEL_EXPORTER_OTLP_*` repointing shuts off in lockstep with the
-    /// external stream activating. A desync would point the internally-authed
-    /// firehose at the customer collector while
-    /// `internal_pipeline_consumed_otel_vars` blocks the external stream.
-    #[test]
-    fn external_otel_master_switch_resolves_from_all_layers() {
-        let enabled_table: toml::Value =
-            toml::from_str("[telemetry]\notel_enabled = true").unwrap();
-        let disabled_table: toml::Value =
-            toml::from_str("[telemetry]\notel_enabled = false").unwrap();
-        assert!(external_otel_master_switch_from(
-            None,
-            None,
-            Some(&enabled_table)
-        ));
-        assert!(!external_otel_master_switch_from(None, None, None));
-        assert!(!external_otel_master_switch_from(
-            None,
-            Some(false),
-            Some(&enabled_table)
-        ));
-        assert!(external_otel_master_switch_from(
-            None,
-            Some(true),
-            Some(&disabled_table)
-        ));
-        assert!(!external_otel_master_switch_from(
-            Some(&disabled_table),
-            Some(true),
-            Some(&enabled_table)
-        ));
-        assert!(external_otel_master_switch_from(
-            Some(&enabled_table),
-            Some(false),
-            None
-        ));
-        let cfg = EndpointsConfig {
-            otel_exporter_otlp_traces_endpoint: Some(
-                "https://collector.corp:4318/v1/traces".into(),
-            ),
-            external_otel_master_switch: true,
-            ..internal_otlp_test_config()
-        };
-        assert!(!cfg.internal_otlp_consumed_standard_vars());
-        assert!(
-            !cfg.resolve_otlp_traces_endpoint()
-                .contains("collector.corp")
-        );
-    }
-    #[test]
-    fn external_otel_carries_internal_consumed_flag() {
-        let cfg = resolve_external_otel_config_with(
-            None,
-            None,
-            ext_env(&[("GROK_EXTERNAL_OTEL", "1"), ("OTEL_LOGS_EXPORTER", "otlp")]),
-            ext_client(),
-            true,
-        )
-        .expect("resolution itself still succeeds");
-        assert!(cfg.internal_pipeline_consumed_otel_vars);
-    }
     fn empty_config() -> toml::Value {
         toml::Value::Table(toml::map::Map::new())
     }
@@ -11636,19 +10705,6 @@ telemetry = "garbage"
         )
         .unwrap();
         assert_eq!(telemetry_enabled_from_toml(&unknown), None);
-    }
-    #[test]
-    #[serial]
-    fn is_telemetry_explicitly_disabled_sync_env_signals() {
-        unsafe { std::env::set_var("GROK_TELEMETRY_ENABLED", "0") };
-        unsafe { std::env::remove_var("DISABLE_TELEMETRY") };
-        assert!(is_telemetry_explicitly_disabled_sync());
-        unsafe { std::env::set_var("GROK_TELEMETRY_ENABLED", "1") };
-        assert!(!is_telemetry_explicitly_disabled_sync());
-        unsafe { std::env::remove_var("GROK_TELEMETRY_ENABLED") };
-        unsafe { std::env::set_var("DISABLE_TELEMETRY", "1") };
-        assert!(is_telemetry_explicitly_disabled_sync());
-        unsafe { std::env::remove_var("DISABLE_TELEMETRY") };
     }
     #[test]
     fn version_overrides_apply_into_typed_config() {

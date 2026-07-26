@@ -1354,7 +1354,7 @@ pub async fn connect_or_spawn(
 /// still resolves (via `/proc/self/exe` on Linux) to the *old* versioned target,
 /// so spawning it would relaunch the stale binary. The symlink always points to
 /// the freshly-installed version. This mirrors
-/// `xai_grok_update::auto_update::resolve_restart_exe`.
+/// the restart-exe resolution the updater used to provide.
 ///
 /// For a **dev / out-of-tree binary** (`cargo run`, integration tests, installs
 /// not under `grok_home`), keep `current_exe()` so the spawned leader matches the

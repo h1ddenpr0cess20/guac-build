@@ -7,35 +7,6 @@ fn jwt_with_tier(tier: u64) -> String {
     let payload = enc.encode(format!(r#"{{"tier":{tier}}}"#).as_bytes());
     format!("{header}.{payload}.sig")
 }
-#[test]
-fn jwt_tier_claim_maps_free_and_paid() {
-    assert_eq!(jwt_tier_claim(&jwt_with_tier(0)).as_deref(), Some("free"));
-    assert_eq!(
-        jwt_tier_claim(&jwt_with_tier(1)).as_deref(),
-        Some("supergrok")
-    );
-    assert_eq!(
-        jwt_tier_claim(&jwt_with_tier(2)).as_deref(),
-        Some("x_basic")
-    );
-    assert_eq!(
-        jwt_tier_claim(&jwt_with_tier(3)).as_deref(),
-        Some("x_premium")
-    );
-    assert_eq!(
-        jwt_tier_claim(&jwt_with_tier(4)).as_deref(),
-        Some("x_premium_plus")
-    );
-    assert_eq!(
-        jwt_tier_claim(&jwt_with_tier(5)).as_deref(),
-        Some("supergrok_heavy")
-    );
-    assert_eq!(
-        jwt_tier_claim(&jwt_with_tier(6)).as_deref(),
-        Some("supergrok_lite")
-    );
-    assert_eq!(jwt_tier_claim(&jwt_with_tier(99)).as_deref(), Some("99"));
-}
 fn auth_with_mode(mode: crate::auth::AuthMode, key: &str) -> crate::auth::GrokAuth {
     crate::auth::GrokAuth {
         key: key.into(),
@@ -63,67 +34,6 @@ fn auth_with_mode(mode: crate::auth::AuthMode, key: &str) -> crate::auth::GrokAu
         oidc_issuer: None,
         oidc_client_id: None,
     }
-}
-#[test]
-fn resolve_subscription_tier_prefers_display_then_api_key_then_jwt() {
-    assert_eq!(
-        resolve_subscription_tier_for_telemetry(Some("Free".into()), None).as_deref(),
-        Some("Free")
-    );
-    let api = auth_with_mode(crate::auth::AuthMode::ApiKey, "xai-not-a-jwt");
-    assert_eq!(
-        resolve_subscription_tier_for_telemetry(Some("  ".into()), Some(&api)).as_deref(),
-        Some("api_key")
-    );
-    assert_eq!(
-        resolve_subscription_tier_for_telemetry(None, Some(&api)).as_deref(),
-        Some("api_key")
-    );
-    let oauth = auth_with_mode(crate::auth::AuthMode::Oidc, &jwt_with_tier(0));
-    assert_eq!(
-        resolve_subscription_tier_for_telemetry(None, Some(&oauth)).as_deref(),
-        Some("free")
-    );
-    assert_ne!(
-        resolve_subscription_tier_for_telemetry(None, Some(&api)).as_deref(),
-        Some("free")
-    );
-}
-/// JWT claim ↔ `/user` tier mapping used to gate post-unblock catalog refresh
-/// (a stale older paid claim must not skip retry).
-#[test]
-fn jwt_claim_matches_user_subscription_tier_known_pairs() {
-    let cases = [
-        ("supergrok", "GrokPro"),
-        ("x_basic", "XBasic"),
-        ("x_premium", "XPremium"),
-        ("x_premium_plus", "XPremiumPlus"),
-        ("supergrok_heavy", "SuperGrokPro"),
-        ("supergrok_lite", "SuperGrokLite"),
-    ];
-    for (claim, user_tier) in cases {
-        assert!(
-            jwt_claim_matches_user_subscription_tier(claim, user_tier),
-            "{claim} should match {user_tier}"
-        );
-    }
-}
-#[test]
-fn jwt_claim_matches_user_subscription_tier_rejects_stale_and_unknown() {
-    assert!(!jwt_claim_matches_user_subscription_tier(
-        "x_basic",
-        "SuperGrokPro"
-    ));
-    assert!(!jwt_claim_matches_user_subscription_tier(
-        "supergrok",
-        "SuperGrokPro"
-    ));
-    assert!(!jwt_claim_matches_user_subscription_tier("free", "GrokPro"));
-    assert!(!jwt_claim_matches_user_subscription_tier("", "XPremium"));
-    assert!(!jwt_claim_matches_user_subscription_tier(
-        "supergrok_heavy",
-        "EnterpriseMystery"
-    ));
 }
 /// Single-flight flag must clear on Drop even if the retry task panics /
 /// aborts mid-backoff (guards against the flag stuck true forever).
@@ -353,42 +263,6 @@ fn trace_turn_to_i32_saturates_at_max() {
     let boundary: u64 = i32::MAX as u64;
     let result = i32::try_from(boundary).unwrap_or(i32::MAX);
     assert_eq!(result, i32::MAX);
-}
-/// When remote settings are absent (`None`), default to blocked.
-#[test]
-fn settings_allow_access_none_settings_is_blocked() {
-    assert!(!settings_allow_access(None));
-}
-/// When `allow_access` is `Some(true)`, user is allowed.
-#[test]
-fn settings_allow_access_true_is_allowed() {
-    let rs = crate::util::config::RemoteSettings {
-        allow_access: Some(true),
-        ..Default::default()
-    };
-    assert!(settings_allow_access(Some(&rs)));
-}
-/// When `allow_access` is `Some(false)` (remote settings default / rule
-/// disabled), user stays blocked — even if they hold a qualifying
-/// subscription. This is the regression guard for the bug where
-/// `retry_subscription_check` unconditionally lifted the gate.
-#[test]
-fn settings_allow_access_false_is_blocked() {
-    let rs = crate::util::config::RemoteSettings {
-        allow_access: Some(false),
-        ..Default::default()
-    };
-    assert!(!settings_allow_access(Some(&rs)));
-}
-/// When `/settings` returned successfully but the field is absent
-/// (`None`), default to blocked (conservative).
-#[test]
-fn settings_allow_access_field_absent_is_blocked() {
-    let rs = crate::util::config::RemoteSettings {
-        allow_access: None,
-        ..Default::default()
-    };
-    assert!(!settings_allow_access(Some(&rs)));
 }
 /// After allocating a turn number, `session_turn_numbers` holds the next
 /// value (current + 1). This is the value that must be persisted via
@@ -2293,18 +2167,6 @@ fn orphaned_tasks_filters_rewind_dead_branches() {
     );
 }
 #[test]
-fn allow_access_from_remote_settings() {
-    let json = serde_json::json!({ "allow_access": true });
-    let rs: crate::util::config::RemoteSettings = serde_json::from_value(json).unwrap();
-    assert_eq!(rs.allow_access, Some(true));
-    let json = serde_json::json!({ "allow_access": false });
-    let rs: crate::util::config::RemoteSettings = serde_json::from_value(json).unwrap();
-    assert_eq!(rs.allow_access, Some(false));
-    let json = serde_json::json!({});
-    let rs: crate::util::config::RemoteSettings = serde_json::from_value(json).unwrap();
-    assert_eq!(rs.allow_access, None);
-}
-#[test]
 fn on_demand_enabled_from_remote_settings() {
     let json = serde_json::json!({ "on_demand_enabled": false });
     let rs: crate::util::config::RemoteSettings = serde_json::from_value(json).unwrap();
@@ -2478,33 +2340,11 @@ async fn cached_token_fallthrough_falls_to_grok_com_without_credentials() {
         "no API-key creds and no kill switch -> interactive grok.com login",
     );
 }
-/// Verifies the 4-state matrix of `(disable_zdr_incompatible_tools, zdr_video_output_s3)`:
-///
-/// | ZDR flag | S3 config | Result                                      |
-/// |----------|-----------|---------------------------------------------|
-/// | false    | None      | Enabled, no S3 (normal non-ZDR mode)        |
-/// | true     | None      | Disabled (ZDR with no escape hatch)         |
-/// | false    | Some      | Enabled, S3 **not** threaded (non-ZDR)      |
-/// | true     | Some      | Enabled, S3 threaded (ZDR with upload path) |
+/// `disable_zdr_incompatible_tools` drops `video_gen` outright: generation
+/// is server-side, so there is no ZDR-compatible way to run it.
 #[tokio::test(flavor = "current_thread")]
 async fn prepare_video_gen_config_disabled_when_zdr_flag_set() {
-    use xai_grok_tools::implementations::grok_build::video_gen::{
-        S3AccessCredentials, VideoGenConfig, ZdrVideoOutputS3Config,
-    };
-    fn zdr_s3() -> ZdrVideoOutputS3Config {
-        ZdrVideoOutputS3Config {
-            bucket: "team-videos".into(),
-            endpoint: "https://s3.example.com".into(),
-            region: "us-east-1".into(),
-            key_prefix: "grok-videos/".into(),
-            expires_secs: 900,
-            read_write: S3AccessCredentials {
-                access_key_id: "AKIA...".into(),
-                secret_access_key: "secret".into(),
-            },
-            read_only: None,
-        }
-    }
+    use xai_grok_tools::implementations::grok_build::video_gen::VideoGenConfig;
     let agent = build_minimal_agent_for_tests();
     agent.sampling_config.borrow_mut().api_key = Some("test-key".to_string());
     assert!(matches!(
@@ -2516,28 +2356,6 @@ async fn prepare_video_gen_config_disabled_when_zdr_flag_set() {
         agent.prepare_video_gen_config(),
         VideoGenConfig::Disabled
     ));
-    agent.cfg.borrow_mut().zdr_video_output_s3 = Some(zdr_s3());
-    agent.cfg.borrow_mut().disable_zdr_incompatible_tools = false;
-    let VideoGenConfig::Enabled {
-        zdr_video_output_s3: s3_when_non_zdr,
-        ..
-    } = agent.prepare_video_gen_config()
-    else {
-        panic!("expected Enabled");
-    };
-    assert!(
-        s3_when_non_zdr.is_none(),
-        "S3 config must not be threaded when ZDR flag is off"
-    );
-    agent.cfg.borrow_mut().disable_zdr_incompatible_tools = true;
-    let VideoGenConfig::Enabled {
-        zdr_video_output_s3,
-        ..
-    } = agent.prepare_video_gen_config()
-    else {
-        panic!("expected Enabled");
-    };
-    assert!(zdr_video_output_s3.as_ref().is_some_and(|c| c.is_valid()));
 }
 #[tokio::test(flavor = "current_thread")]
 async fn prepare_video_gen_config_respects_feature_flag() {
@@ -2554,30 +2372,10 @@ async fn prepare_video_gen_config_respects_feature_flag() {
         VideoGenConfig::Disabled
     ));
 }
-/// The imagine tier gate fails **open**: with no resolved auth we can't confirm
-/// a restricted personal tier, so the tools stay advertised and un-flagged (the
-/// server 429 remains the authoritative backstop). Guards against accidentally
-/// disabling a paid feature when tier info hasn't loaded.
-#[tokio::test(flavor = "current_thread")]
-async fn prepare_image_gen_config_fails_open_without_auth() {
-    use xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig;
-    let agent = build_minimal_agent_for_tests();
-    agent.sampling_config.borrow_mut().api_key = Some("test-key".to_string());
-    let ImageGenConfig::Enabled {
-        tier_restricted, ..
-    } = agent.prepare_image_gen_config()
-    else {
-        panic!("expected Enabled");
-    };
-    assert!(
-        !tier_restricted,
-        "no resolved auth ⇒ fail open (tools not tier-restricted)"
-    );
-}
-/// The imagine tools bypass cli-chat-proxy (direct API calls), so the server
-/// can only scope the coding data-retention opt-out (`/privacy opt-out`) to
-/// Build traffic via the `x-grok-client-identifier` header. If this header is
-/// dropped, opted-out users' imagine prompts are logged/retained server-side.
+/// The media tools call the API directly, so the server can only scope the
+/// coding data-retention opt-out (`/privacy opt-out`) to Build traffic via the
+/// `x-guac-client-identifier` header. If this header is dropped, opted-out
+/// users' media prompts are logged/retained server-side.
 #[tokio::test(flavor = "current_thread")]
 async fn prepare_image_gen_config_sends_client_identifier_header() {
     use xai_grok_tools::implementations::grok_build::image_gen::ImageGenConfig;
@@ -2588,10 +2386,10 @@ async fn prepare_image_gen_config_sends_client_identifier_header() {
     };
     assert_eq!(
         extra_headers
-            .get("x-grok-client-identifier")
+            .get("x-guac-client-identifier")
             .map(String::as_str),
         Some(crate::http::process_client_identifier().as_str()),
-        "imagine API calls must carry the client identifier so the server \
+        "media API calls must carry the client identifier so the server \
          applies the coding ZDR opt-out to Build traffic"
     );
 }
@@ -2606,7 +2404,7 @@ async fn prepare_video_gen_config_sends_client_identifier_header() {
     };
     assert_eq!(
         extra_headers
-            .get("x-grok-client-identifier")
+            .get("x-guac-client-identifier")
             .map(String::as_str),
         Some(crate::http::process_client_identifier().as_str()),
         "video gen API calls must carry the client identifier so the server \
@@ -3076,13 +2874,12 @@ async fn remove_session_releases_workspace_binding_and_side_maps() {
     assert!(!agent.session_turn_numbers.borrow().contains_key(&sid));
     assert!(!agent.permission_event_receivers.borrow().contains_key(&sid));
 }
-/// Without a bridge, `ext_method` falls through to the unchanged local
-/// dispatch (`rewind::handle`), which reports the missing session — proving
-/// the routing hook is skipped in local mode.
+/// `ext_method` dispatches locally (`rewind::handle`), which reports the
+/// missing session. This build has no remote bridge at all, so local dispatch
+/// is the only path.
 #[test]
 fn ext_method_rewind_uses_local_dispatch_without_bridge() {
     use acp::Agent as _;
-    let _env = crate::env::EnvVarGuard::remove(crate::env::GROK_DISABLE_CUSTOM_BRIDGE_ENV);
     run_local_for_bridge_test(|| async {
         let agent = build_minimal_agent_for_tests();
         let params = serde_json::json!({ "sessionId": "sess-local" });
@@ -4541,12 +4338,10 @@ async fn polled_announcements_apply_touches_announcements_only() {
     let agent = build_minimal_agent_for_tests();
     let mut stored = settings_with(Some(vec![ann("old")]));
     stored.tips = Some(vec!["stored-tip".to_string()]);
-    stored.allow_access = Some(true);
     stored.default_model = Some("stored-model".to_string());
     agent.cfg.borrow_mut().remote_settings = Some(stored);
     let mut fresh = settings_with(Some(vec![ann("new")]));
     fresh.tips = Some(vec!["fresh-tip".to_string()]);
-    fresh.allow_access = Some(false);
     fresh.default_model = Some("fresh-model".to_string());
     agent.apply_polled_announcements(fresh, Some(vec![ann("old")]));
     let cfg = agent.cfg.borrow();
@@ -4559,11 +4354,6 @@ async fn polled_announcements_apply_touches_announcements_only() {
         after.tips,
         Some(vec!["stored-tip".to_string()]),
         "tips must be untouched by a poll apply"
-    );
-    assert_eq!(
-        after.allow_access,
-        Some(true),
-        "allow_access must be untouched by a poll apply"
     );
     assert_eq!(
         after.default_model.as_deref(),

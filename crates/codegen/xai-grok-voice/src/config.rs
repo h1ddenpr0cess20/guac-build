@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use xai_grok_env::FIRST_PARTY_API_HOST;
+
 use crate::error::VoiceError;
 
 /// Default STT capture rate (Hz). Shared with the `__mic-capture` helper's
@@ -32,10 +34,16 @@ pub struct VoiceConfig {
     pub user_agent: String,
 }
 
+/// Default STT host: the fork's own first-party API, so voice follows the
+/// same endpoint as every other request path instead of pinning its own.
+pub fn default_api_base() -> String {
+    format!("https://{FIRST_PARTY_API_HOST}")
+}
+
 impl Default for VoiceConfig {
     fn default() -> Self {
         Self {
-            api_base: "https://api.x.ai".into(),
+            api_base: default_api_base(),
             stt_ws_path: "/v1/stt".into(),
             language: "en".into(),
             sample_rate: DEFAULT_SAMPLE_RATE,
@@ -54,7 +62,7 @@ impl VoiceConfig {
     }
 
     /// `api_base`: non-empty `[voice].api_base`, else `[endpoints].xai_api_base_url`
-    /// from `root`, else `resolved_endpoints_base`, else `https://api.x.ai`.
+    /// from `root`, else `resolved_endpoints_base`, else [`default_api_base`].
     ///
     /// `resolved_endpoints_base` carries the caller's env / CLI overrides; it
     /// ranks below the raw table so config keeps beating env (shell precedence).
@@ -65,7 +73,7 @@ impl VoiceConfig {
             .unwrap_or_default();
 
         // Read `[voice].api_base` from the raw table, not `cfg`: serde default
-        // makes "unset" and an explicit `https://api.x.ai` indistinguishable.
+        // makes "unset" and an explicit default host indistinguishable.
         cfg.api_base = non_empty_str(
             voice_table
                 .and_then(|t| t.get("api_base"))
@@ -126,18 +134,26 @@ mod tests {
     fn default_stt_ws_uses_wss() {
         assert_eq!(
             VoiceConfig::default().stt_ws_url().unwrap(),
-            "wss://api.x.ai/v1/stt"
+            format!("wss://{FIRST_PARTY_API_HOST}/v1/stt")
         );
     }
 
     #[test]
     fn scheme_less_and_wss_bases() {
-        for base in ["api.x.ai", "wss://api.x.ai", "HTTPS://api.x.ai"] {
+        let host = FIRST_PARTY_API_HOST;
+        for base in [
+            host.to_owned(),
+            format!("wss://{host}"),
+            format!("HTTPS://{host}"),
+        ] {
             let cfg = VoiceConfig {
-                api_base: base.into(),
+                api_base: base.clone(),
                 ..VoiceConfig::default()
             };
-            assert_eq!(cfg.stt_ws_url().unwrap(), "wss://api.x.ai/v1/stt");
+            assert_eq!(
+                cfg.stt_ws_url().unwrap(),
+                format!("wss://{FIRST_PARTY_API_HOST}/v1/stt")
+            );
         }
     }
 
@@ -223,7 +239,10 @@ api_base = "  "
         .unwrap();
         let cfg = VoiceConfig::from_config_table(&table, None);
         assert_eq!(cfg.api_base, VoiceConfig::default().api_base);
-        assert_eq!(cfg.stt_ws_url().unwrap(), "wss://api.x.ai/v1/stt");
+        assert_eq!(
+            cfg.stt_ws_url().unwrap(),
+            format!("wss://{FIRST_PARTY_API_HOST}/v1/stt")
+        );
     }
 
     #[test]
@@ -261,15 +280,18 @@ xai_api_base_url = "https://config.example.com"
 [endpoints]
 xai_api_base_url = "https://proxy.example.com/xai/v1"
 [voice]
-api_base = "https://api.x.ai"
+api_base = "https://api.meta.ai"
 language = "es"
 "#,
         )
         .unwrap();
         let cfg = VoiceConfig::from_config_table(&table, None);
-        assert_eq!(cfg.api_base, "https://api.x.ai");
+        assert_eq!(cfg.api_base, "https://api.meta.ai");
         assert_eq!(cfg.language, "es");
-        assert_eq!(cfg.stt_ws_url().unwrap(), "wss://api.x.ai/v1/stt");
+        assert_eq!(
+            cfg.stt_ws_url().unwrap(),
+            format!("wss://{FIRST_PARTY_API_HOST}/v1/stt")
+        );
     }
 
     #[test]

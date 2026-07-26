@@ -24,6 +24,7 @@ url = { workspace = true }
 # Sanctioned TTY detach for the capture subprocesses (Linux system recorders,
 # macOS `__mic-capture` self-exec helper) — workspace rule: never spawn a raw
 # `std::process::Command`.
+xai-grok-env = { workspace = true }
 xai-tty-utils = { workspace = true }
 
 [features]

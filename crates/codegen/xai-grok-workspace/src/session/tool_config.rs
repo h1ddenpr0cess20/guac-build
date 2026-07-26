@@ -426,14 +426,11 @@ impl SessionContextFactory for WorkspaceSessionContextFactory {
                                 image_edit_enabled: true,
                                 model_override: None,
                                 edit_model_override: None,
-                                tier_restricted: false,
                             },
                             VideoGenConfig::Enabled {
                                 api_key: token.clone(),
                                 base_url: url.clone(),
                                 extra_headers: headers.clone(),
-                                zdr_video_output_s3: None,
-                                tier_restricted: false,
                             },
                             WebSearchConfig::Enabled {
                                 api_key: token,
@@ -508,9 +505,9 @@ fn build_proxy_headers(base_url: &str) -> indexmap::IndexMap<String, String> {
         "user-agent".to_string(),
         format!("xai-grok-workspace/{version}"),
     );
-    headers.insert("x-grok-client-version".to_string(), version.to_string());
+    headers.insert("x-guac-client-version".to_string(), version.to_string());
     headers.insert(
-        "x-grok-client-identifier".to_string(),
+        "x-guac-client-identifier".to_string(),
         std::env::var("GROK_CLIENT_NAME").unwrap_or_else(|_| "grok-shell".to_string()),
     );
     if base_url.contains("cli-chat-proxy") || base_url.contains("chat-proxy") {

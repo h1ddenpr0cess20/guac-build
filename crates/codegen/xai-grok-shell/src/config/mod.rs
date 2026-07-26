@@ -717,7 +717,6 @@ impl ModelOverrideConfig {
 /// ```toml
 /// [tools]
 /// disable_zdr_incompatible_tools = true
-/// # [tools.zdr_video_output_s3] — see ZdrVideoOutputS3Config
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(default)]
@@ -725,17 +724,10 @@ pub struct ToolsConfig {
     /// When `true`, all tools (including `read_file`) filter gitignored
     /// files. When `false` (default), each tool picks its own default.
     pub respect_gitignore: bool,
-    /// Drop tools whose xAI API requires server-side artifact storage
-    /// (currently just `video_gen`). Intended for ZDR-bound teams via
+    /// Drop tools that require server-side artifact storage (currently just
+    /// `video_gen`). Intended for ZDR-bound teams via
     /// `~/.grok/managed_config.toml`. Defaults to `false`.
     pub disable_zdr_incompatible_tools: bool,
-    /// Optional S3 bucket config for ZDR video output. When present (and
-    /// valid), video tools presign an upload URL and pass it to the API so
-    /// the generated video lands in a team-owned bucket instead of being
-    /// downloaded locally. Only effective when `disable_zdr_incompatible_tools`
-    /// is `true`. Populated from `[tools.zdr_video_output_s3]` in config.
-    pub zdr_video_output_s3:
-        Option<xai_grok_tools::implementations::grok_build::video_gen::ZdrVideoOutputS3Config>,
 }
 impl ToolsConfig {
     /// Resolve the final tools config, in priority order:
@@ -759,29 +751,6 @@ impl ToolsConfig {
                 .and_then(|t| t.get("disable_zdr_incompatible_tools"))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
-            zdr_video_output_s3: tools
-                .and_then(|t| t.get("zdr_video_output_s3"))
-                .and_then(|s3_val| match s3_val
-                    .clone()
-                    .try_into::<
-                        xai_grok_tools::implementations::grok_build::video_gen::ZdrVideoOutputS3Config,
-                    >()
-                {
-                    Ok(cfg) if cfg.is_valid() => Some(cfg),
-                    Ok(_) => {
-                        tracing::warn!(
-                                "tools.zdr_video_output_s3 is present but incomplete; ignoring ZDR video output config"
-                            );
-                        None
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                                error = %e,
-                                "tools.zdr_video_output_s3 failed to parse; ignoring ZDR video output config"
-                            );
-                        None
-                    }
-                }),
         };
         match std::env::var("GROK_RESPECT_GITIGNORE").as_deref() {
             Ok("0") | Ok("false") => {
@@ -1213,24 +1182,6 @@ fn apply_requirements_inner(
         "endpoints",
         "deployment_key",
         config.endpoints.deployment_key,
-        redacted
-    );
-    enforce_str!("telemetry", "events_url", config.telemetry.events_url);
-    enforce_str!(
-        "telemetry",
-        "events_api_key",
-        config.telemetry.events_api_key,
-        redacted
-    );
-    enforce_val!(
-        "telemetry",
-        "mixpanel_enabled",
-        config.telemetry.mixpanel_enabled
-    );
-    enforce_str!(
-        "telemetry",
-        "mixpanel_token",
-        config.telemetry.mixpanel_token,
         redacted
     );
     enforce_str!(

@@ -118,15 +118,12 @@ enum UploadFailureLogLevel {
     Warn,
     Debug,
 }
-/// ERROR is what logging / alerting treat as a first-party incident, so it is
-/// reserved for first-party backends (proxy, cloud storage); a failing
-/// customer-managed S3 bucket is the customer's outage and logs at WARN.
-/// Repeats within one failure episode drop to DEBUG.
-fn upload_failure_log_level(method: &UploadMethod, prior_failures: u64) -> UploadFailureLogLevel {
+/// ERROR is what logging / alerting treat as a first-party incident. Every
+/// remaining backend is first-party, so a first failure logs at ERROR and
+/// repeats within one failure episode drop to DEBUG.
+fn upload_failure_log_level(prior_failures: u64) -> UploadFailureLogLevel {
     if prior_failures > 0 {
         UploadFailureLogLevel::Debug
-    } else if matches!(method, UploadMethod::S3 { .. }) {
-        UploadFailureLogLevel::Warn
     } else {
         UploadFailureLogLevel::Error
     }
@@ -137,7 +134,6 @@ fn upload_method_label(method: &UploadMethod) -> &'static str {
     match method {
         UploadMethod::Direct { .. } => TraceUploadReason::DirectGcs,
         UploadMethod::Proxy { .. } => TraceUploadReason::Proxy,
-        UploadMethod::S3 { .. } => TraceUploadReason::DirectS3,
     }
     .as_str()
 }
@@ -158,7 +154,7 @@ fn record_upload_failure(ctx: &PromptTraceContext, f: UploadFailure<'_>) {
         .session_handle
         .upload_failures_since_success
         .fetch_add(1, Relaxed);
-    let level = upload_failure_log_level(&ctx.gcs_config.upload_method, prior_failures);
+    let level = upload_failure_log_level(prior_failures);
     let method = upload_method_label(&ctx.gcs_config.upload_method);
     macro_rules! log_failure {
         ($level:ident) => {
@@ -2402,19 +2398,12 @@ mod tests {
         }
         tempfile::tempdir_in(home).ok()
     }
-    /// Customer-managed S3 failures stay below the ERROR alerting threshold,
-    /// repeats within an episode drop to debug, and the `method` log field
-    /// keeps the structured upload-method vocabulary.
+    /// A first failure is a first-party incident (ERROR); repeats within one
+    /// episode drop to DEBUG, and the `method` log field keeps the structured
+    /// upload-method vocabulary.
     #[test]
-    fn upload_failure_log_level_splits_on_backend_and_repeats() {
+    fn upload_failure_log_level_splits_on_repeats() {
         use crate::session::repo_changes::UploadMethod;
-        let s3 = UploadMethod::S3 {
-            bucket: "bucket".into(),
-            region: "region".into(),
-            credentials_file: None,
-            credentials_content: None,
-            endpoint_url: None,
-        };
         let proxy = UploadMethod::Proxy {
             proxy_base_url: "https://proxy.example/v1".into(),
             user_token: "token".into(),
@@ -2424,25 +2413,8 @@ mod tests {
         let gcs = UploadMethod::Direct {
             service_account_key: None,
         };
-        assert_eq!(
-            upload_failure_log_level(&s3, 0),
-            UploadFailureLogLevel::Warn
-        );
-        assert_eq!(
-            upload_failure_log_level(&proxy, 0),
-            UploadFailureLogLevel::Error
-        );
-        assert_eq!(
-            upload_failure_log_level(&gcs, 0),
-            UploadFailureLogLevel::Error
-        );
-        for method in [&s3, &proxy, &gcs] {
-            assert_eq!(
-                upload_failure_log_level(method, 1),
-                UploadFailureLogLevel::Debug
-            );
-        }
-        assert_eq!(upload_method_label(&s3), "direct_s3");
+        assert_eq!(upload_failure_log_level(0), UploadFailureLogLevel::Error);
+        assert_eq!(upload_failure_log_level(1), UploadFailureLogLevel::Debug);
         assert_eq!(upload_method_label(&proxy), "proxy");
         assert_eq!(upload_method_label(&gcs), "direct_gcs");
     }

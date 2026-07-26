@@ -25,7 +25,7 @@ pub fn installed_semver() -> Result<Version, semver::Error> {
 ///
 /// `channel_label` is a pre-formatted suffix such as `" [alpha]"`, `" [stable]"`,
 /// or `""` (empty when no cached pointer is available). Obtain it from
-/// `xai_grok_update::channel_label()`.
+/// the release-channel label (empty in this build).
 ///
 /// Example: `"0.2.5 [stable]"` or `"0.2.5 [alpha]"`.
 pub fn display_version(channel_label: &str) -> String {

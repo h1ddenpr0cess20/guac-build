@@ -131,32 +131,6 @@ pub(super) fn handle_settings_update(notif: &acp::ExtNotification, app: &mut App
                 .unwrap_or(v),
         );
     }
-    // Tier before voice: same payload may set "API Key" and voice_mode_enabled=false.
-    // Always recompute is_api_key_auth from the tier so a later Free/SuperGrok
-    // stamp does not leave API-key bypass / a hidden billing surface stuck.
-    if let Some(v) = update.subscription_tier_display {
-        let was_api_key = app.is_api_key_auth;
-        let is_key = super::super::app_view::is_api_key_label(&v);
-        app.is_api_key_auth = is_key;
-        app.usage_visible = !is_key && app.team_name.is_none();
-        app.sync_billing_surface_to_agents();
-        app.subscription_tier = Some(v);
-        app.apply_tier_restrictions();
-        // Leaving API Key → free/X Basic without a voice field: drop force-on.
-        // Paid tiers keep voice; remote settings may send voice_mode_enabled later.
-        if was_api_key
-            && !is_key
-            && update.voice_mode_enabled.is_none()
-            && app
-                .subscription_tier
-                .as_deref()
-                .is_some_and(xai_grok_shell::tier::is_restricted_tier_name)
-        {
-            app.voice_reset();
-            app.voice_ui_active = false;
-            app.apply_voice_mode_enabled(false);
-        }
-    }
     if let Some(remote_v) = update.voice_mode_enabled {
         let v = crate::app::resolve_voice_mode_live(Some(remote_v), app.is_api_key_auth);
         if !v {
@@ -185,33 +159,6 @@ pub(super) fn handle_settings_update(notif: &acp::ExtNotification, app: &mut App
             .unwrap_or(remote_val);
         app.session_picker_grouped = resolved;
     }
-    if let Some(v) = update.subscription_watch_interval_secs {
-        app.subscription_watch_interval_secs = Some(v);
-    }
-
-    // Gate update logic:
-    // - allow_access == Some(true): explicitly granted → lift the gate
-    // - gate_message.is_some(): server sent a new message → impose/update
-    // - Neither condition met: don't touch the gate. In particular,
-    //   allow_access=Some(false) without a gate_message must NOT clear the
-    //   gate (gate_from_settings returns None when gate_message is absent,
-    //   which would incorrectly lift an existing gate).
-    if update.allow_access == Some(true) {
-        let effs = app.lift_gate();
-        app.pending_effects.extend(effs);
-    } else if let Some(msg) = update.gate_message.as_ref()
-        && !msg.is_empty()
-    {
-        // (An empty gate_message would only clear the gate message text, NOT
-        // access, so it intentionally does not touch the gate here.)
-        let effs = app.impose_gate(xai_grok_shell::auth::GateInfo {
-            message: msg.clone(),
-            url: update.gate_url.clone(),
-            label: update.gate_label.clone(),
-        });
-        app.pending_effects.extend(effs);
-    }
-
     // Load config layers once for tips + group_tool_verbs +
     // collapsed_edit_blocks resolution. Loaded unconditionally: the UI flags
     // re-resolve on every update (see below), and updates are rare (post-auth
@@ -524,16 +471,6 @@ pub(super) struct PagerSettingsUpdate {
     // (emit_announcements_if_changed), and a gen-less apply on this path could
     // clobber a newer push. Single ingest path: handle_announcements_update.
     #[serde(default)]
-    gate_message: Option<String>,
-    #[serde(default)]
-    gate_url: Option<String>,
-    #[serde(default)]
-    gate_label: Option<String>,
-    #[serde(default)]
-    allow_access: Option<bool>,
-    #[serde(default)]
-    subscription_tier_display: Option<String>,
-    #[serde(default)]
     auto_permission_mode_enabled: Option<bool>,
     /// Soft-default permission mode. Presence-aware: omit = no update,
     /// `null` = recompute with remote=None, string = that soft-default.
@@ -546,8 +483,6 @@ pub(super) struct PagerSettingsUpdate {
     group_tool_verbs: Option<bool>,
     #[serde(default)]
     collapsed_edit_blocks: Option<bool>,
-    #[serde(default)]
-    subscription_watch_interval_secs: Option<u64>,
 }
 
 /// Presence-aware string: omit → `None` (`#[serde(default)]`), null →

@@ -61,7 +61,7 @@ impl From<serde_json::Value> for DynamicOutput {
 /// tagged and only accepts map payloads.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MediaGenOutput {
-    /// Absolute path to the saved media file. Empty for [`Self::uploaded`].
+    /// Absolute path to the saved media file.
     pub path: PathBuf,
     /// Basename of the saved media file (for example, `8.jpg`).
     #[serde(default)]
@@ -69,10 +69,6 @@ pub struct MediaGenOutput {
     /// Session-relative media directory name (for example, `images` or `videos`).
     #[serde(default)]
     pub session_folder: String,
-    /// Set when the media was uploaded to a remote presigned URL (ZDR video
-    /// output) and is not available locally; omitted otherwise.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub uploaded_url: Option<String>,
 }
 impl MediaGenOutput {
     pub fn new(path: PathBuf) -> Self {
@@ -89,28 +85,12 @@ impl MediaGenOutput {
             path,
             filename,
             session_folder,
-            uploaded_url: None,
-        }
-    }
-    /// Media uploaded to a remote presigned URL and not available locally
-    /// (ZDR video output). No local path/filename/session folder.
-    pub fn uploaded(url: String) -> Self {
-        Self {
-            path: PathBuf::new(),
-            filename: String::new(),
-            session_folder: String::new(),
-            uploaded_url: Some(url),
         }
     }
     /// Model-facing prose. `action` is the variant's lead-in
     /// ("Image generated" / "Video generated" / "Image edited"); the trailing
     /// guidance stops the model re-reading or narrating the result.
     pub fn prompt_text(&self, action: &str) -> String {
-        if let Some(url) = &self.uploaded_url {
-            return format!(
-                "{action} and uploaded to {url}. The file is not available locally — reference it by this URL. Do not read or re-display it, and do not describe how it appears to the user."
-            );
-        }
         let path = self.path.to_string_lossy().to_string();
         let message = format!(
             "{action} and saved to {path}. Do not read or re-display it, and do not describe how it appears to the user."
@@ -1383,31 +1363,6 @@ mod tests {
             assert_eq!(m.filename, filename);
             assert_eq!(m.session_folder, session_folder);
         }
-    }
-    #[test]
-    fn media_gen_output_uploaded() {
-        let url = "https://files.example.com/team/video-abc.mp4";
-        let output = ToolOutput::ImageToVideo(MediaGenOutput::uploaded(url.to_string()));
-        let prompt = output.to_prompt_format();
-        assert!(prompt.contains(url), "prompt must include the upload URL");
-        assert!(
-            prompt.contains("not available locally"),
-            "prompt must tell the model the file is remote-only"
-        );
-        assert!(
-            prompt.contains("Do not read or re-display"),
-            "prompt must include re-display guard"
-        );
-        let json = to_json(output);
-        assert_eq!(json["uploaded_url"], url);
-        assert!(
-            json.get("path").is_some(),
-            "path field must be present (empty for uploaded)"
-        );
-        let ToolOutput::ImageToVideo(m) = serde_json::from_value(json).unwrap() else {
-            panic!("unexpected variant");
-        };
-        assert_eq!(m, MediaGenOutput::uploaded(url.to_string()));
     }
     #[test]
     fn read_file_not_found_json() {

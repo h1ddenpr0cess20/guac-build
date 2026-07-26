@@ -297,28 +297,6 @@ impl std::fmt::Display for UploadMethodDisplay<'_> {
                 writeln!(f, "  Proxy:    {proxy_base_url}")?;
                 write!(f, "  Deploy:   {deploy}")
             }
-            UploadMethod::S3 {
-                bucket,
-                region,
-                endpoint_url,
-                credentials_content,
-                credentials_file,
-                ..
-            } => {
-                let endpoint = endpoint_url.as_deref().unwrap_or("(default AWS)");
-                let creds = if credentials_content.is_some() {
-                    "inline credentials"
-                } else if credentials_file.is_some() {
-                    "credentials file"
-                } else {
-                    "ambient credentials"
-                };
-                writeln!(f, "  Method:   S3")?;
-                writeln!(f, "  Bucket:   {bucket}")?;
-                writeln!(f, "  Region:   {region}")?;
-                writeln!(f, "  Endpoint: {endpoint}")?;
-                write!(f, "  Auth:     {creds}")
-            }
         }
     }
 }

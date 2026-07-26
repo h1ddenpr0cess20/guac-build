@@ -2,7 +2,6 @@
 //!
 //! [`bootstrap`] runs the full init sequence (config resolution, process
 //! singletons, model catalog) and returns a resolved config + `ModelsManager`.
-//! [`update_telemetry_config`] re-initializes telemetry after auth changes.
 
 use std::sync::Arc;
 
@@ -123,7 +122,6 @@ fn resolve_config(cfg: &AgentConfig, auth_manager: &AuthManager) -> AgentConfig 
 
 /// Initialize process-level singletons (deployment sync, built-in metadata,
 /// telemetry). `Once`-guarded: only the first call takes effect.
-/// Telemetry user ID is updated separately via [`update_telemetry_config`].
 fn init_process(cfg: &AgentConfig, auth_manager: &AuthManager) {
     use std::sync::Once;
     static INIT: Once = Once::new();
@@ -169,32 +167,5 @@ fn init_process(cfg: &AgentConfig, auth_manager: &AuthManager) {
                  session artifacts will be uploaded, analytics events will not"
             );
         }
-        update_telemetry_config(cfg, auth_manager);
     });
-}
-
-/// Apply current telemetry config + auth identity. Tears down the client
-/// when telemetry is disabled, so it's safe to call repeatedly.
-pub fn update_telemetry_config(config: &AgentConfig, auth_manager: &AuthManager) {
-    let grok_auth = auth_manager.current().filter(|a| a.is_xai_auth());
-    let user_id = grok_auth.as_ref().map(|a| a.user_id.clone());
-    let team_id = grok_auth.as_ref().and_then(|a| a.team_id.clone());
-    let subscription_tier = super::mvp_agent::resolve_subscription_tier_for_telemetry(
-        config
-            .remote_settings
-            .as_ref()
-            .and_then(|rs| rs.subscription_tier_display.clone()),
-        auth_manager.current_or_expired().as_ref(),
-    );
-    xai_grok_telemetry::client::init(
-        config.telemetry.clone(),
-        config.resolve_telemetry_mode().value,
-        user_id,
-        team_id,
-        config.endpoints.deployment_key.clone(),
-        crate::http::origin_client_info_from_env(),
-        xai_grok_version::VERSION.to_owned(),
-        subscription_tier,
-        crate::http::shared_client(),
-    );
 }

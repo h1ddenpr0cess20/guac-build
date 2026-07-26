@@ -9,8 +9,6 @@ use toml::Value as TomlValue;
 /// - `Some("stable")` when at or behind stable,
 /// - `None` when no cached pointer is available (first launch, old cache).
 ///
-/// This is a lightweight duplicate of `xai_grok_update::channel_name()` for
-/// use in `xai-grok-shell` which cannot depend on `xai-grok-update`.
 pub fn channel_name_from_cache() -> Option<&'static str> {
     use std::sync::OnceLock;
     static NAME: OnceLock<Option<&'static str>> = OnceLock::new();

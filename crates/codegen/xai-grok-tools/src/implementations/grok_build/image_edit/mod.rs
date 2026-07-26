@@ -1,4 +1,4 @@
-//! `image_edit` tool — edits or transforms images via the xAI Imagine
+//! `image_edit` tool — edits or transforms images via the Meta image
 //! `/images/edits` endpoint using one or more reference images.
 //!
 //! Use cases include likeness preservation, style transfer, subject lock,
@@ -18,7 +18,6 @@ use base64::Engine as _;
 use image::ImageReader;
 use reqwest::header::AUTHORIZATION;
 
-use crate::attribution::ToolConsumer;
 use crate::implementations::grok_build::image_gen::{ImageGenClient, ImageGenResponse};
 use crate::types::output::{MediaGenOutput, ToolOutput};
 use crate::types::requirements::{Expr, ToolRequirement};
@@ -26,9 +25,9 @@ use crate::types::resources::SessionFolder;
 use crate::types::tool::{ToolKind, ToolNamespace};
 use crate::util::image_compress::{FilterType, ReEncodeParams, re_encode_under_limit};
 
-pub(crate) const XAI_IMAGINE_EDIT_MODEL: &str = "grok-imagine-image-quality";
+pub(crate) const META_IMAGE_EDIT_MODEL: &str = "emu-edit";
 
-/// Size/dimension limits for reference images sent to the Imagine API.
+/// Size/dimension limits for reference images sent to the image API.
 /// Tighter than the vision path; the backend returns 400 when exceeded.
 const MAX_REF_RAW_BYTES: usize = 400 * 1024;
 const MAX_REF_DIMENSION: u32 = 768;
@@ -42,7 +41,7 @@ pub const IMAGE_EDIT_TOOL_NAME: &str = "image_edit";
 // Compression
 // ---------------------------------------------------------------------------
 
-/// Compress a reference image to fit within Imagine API limits.
+/// Compress a reference image to fit within image API limits.
 ///
 /// Returns `(bytes, mime)`. Small JPEG/PNG inputs pass through unchanged.
 fn compress_reference(
@@ -89,7 +88,7 @@ fn compress_reference(
     let params = ReEncodeParams {
         max_bytes: MAX_REF_RAW_BYTES,
         max_side_px: MAX_REF_DIMENSION,
-        // Imagine backend limits are side-based; no pixel-area cap applies.
+        // Backend limits are side-based; no pixel-area cap applies.
         max_pixels: u64::MAX,
         min_side_px: MIN_REF_DIMENSION,
         quality_steps: REF_QUALITY_STEPS,
@@ -98,7 +97,7 @@ fn compress_reference(
 
     let (buf, _w, _h, mime) = re_encode_under_limit(&img, &params).map_err(|e| {
         xai_tool_runtime::ToolError::invalid_arguments(format!(
-            "could not compress image reference small enough for Imagine API: {e}"
+            "could not compress image reference small enough for the image API: {e}"
         ))
     })?;
 
@@ -110,7 +109,7 @@ fn compress_reference(
 // ---------------------------------------------------------------------------
 
 /// Resolve a reference (filesystem path or `data:image/...;base64,...` URL)
-/// into a compressed data URL for the Imagine API.
+/// into a compressed data URL for the image API.
 async fn resolve_to_data_url(value: &str) -> Result<String, xai_tool_runtime::ToolError> {
     let value = value.trim();
     // Accept `file://` URIs (e.g. an attachment's durable URI) by reading
@@ -265,7 +264,7 @@ impl crate::types::tool_metadata::ToolMetadata for ImageEditTool {
     }
 
     fn description_template(&self) -> &str {
-        r##"Edit or transform existing image(s) via the xAI Imagine API; use instead of image_gen for image-to-image work (preserve likeness, transfer style, remix). Returns the saved image's absolute path. When telling the user where it was saved, refer to it by its short session-relative path (e.g. `images/1.jpg`) rather than the absolute path, so it renders as a clickable link that opens the image. Each required `image` is one reference — a user-attachment token (e.g. "[Image #1]"), an absolute filesystem path, or a `data:image/...;base64,...` URL (see the `image` parameter for the resolution order and details)."##
+        r##"Edit or transform existing image(s) via the Meta image API; use instead of image_gen for image-to-image work (preserve likeness, transfer style, remix). Returns the saved image's absolute path. When telling the user where it was saved, refer to it by its short session-relative path (e.g. `images/1.jpg`) rather than the absolute path, so it renders as a clickable link that opens the image. Each required `image` is one reference — a user-attachment token (e.g. "[Image #1]"), an absolute filesystem path, or a `data:image/...;base64,...` URL (see the `image` parameter for the resolution order and details)."##
     }
 
     fn requires_expr(&self) -> Expr<ToolRequirement> {
@@ -324,15 +323,6 @@ impl xai_tool_runtime::Tool for ImageEditTool {
             res.require::<ImageGenClient>()?.clone()
         };
 
-        // Free / X Basic users are zero-limited on Imagine server-side; return
-        // the upsell prose instead of a doomed request (shares `image_gen`'s
-        // message and short-circuits before resolving any attachments).
-        if client.is_tier_restricted() {
-            return Ok(ToolOutput::Text(
-                super::image_gen::TIER_RESTRICTED_UPSELL.into(),
-            ));
-        }
-
         // Snapshot the per-turn attachment registry so `[Image #N]` tokens
         // resolve to the real attachment (see `resolve_attachment_reference`).
         let attached_images = {
@@ -375,9 +365,8 @@ impl xai_tool_runtime::Tool for ImageEditTool {
             payload["aspect_ratio"] = serde_json::json!(input.aspect_ratio);
         }
 
-        let sent_bearer = client.current_bearer().await;
         let mut req = client.http().post(&url).json(&payload);
-        if let Some(ref key) = sent_bearer {
+        if let Some(ref key) = client.current_bearer().await {
             req = req.header(AUTHORIZATION, format!("Bearer {key}"));
         }
 
@@ -388,13 +377,10 @@ impl xai_tool_runtime::Tool for ImageEditTool {
         })?;
 
         let status = response.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED {
-            client.record_401_attribution(ToolConsumer::ImageGen, sent_bearer.as_deref());
-        }
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
             let truncated: String = body.chars().take(200).collect();
-            tracing::warn!(http_status = %status, "Imagine edit API error: {truncated}");
+            tracing::warn!(http_status = %status, "Image edit API error: {truncated}");
             return Err(xai_tool_runtime::ToolError::new(
                 xai_tool_runtime::ToolErrorKind::Custom,
                 format!("Image edit failed with HTTP {status}: {truncated}"),
@@ -410,7 +396,7 @@ impl xai_tool_runtime::Tool for ImageEditTool {
 
         let resp_json: ImageGenResponse = serde_json::from_str(&body).map_err(|e| {
             let preview: String = body.chars().take(500).collect();
-            tracing::warn!("Imagine edit API returned unparseable body: {preview}");
+            tracing::warn!("Image edit API returned unparseable body: {preview}");
             xai_tool_runtime::ToolError::invalid_arguments(format!(
                 "Failed to parse image edit response: {e} — body preview: {preview}"
             ))

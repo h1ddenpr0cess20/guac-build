@@ -981,14 +981,6 @@ pub fn perform_logout(
         // parity). Clear the external OTEL identity attrs FIRST so any
         // record emitted from here on cannot carry the prior user's ids; THEN
         // flush already-queued records (which were built with their ids during
-        // the active session — that is correct); THEN clear credentials.
-        // Clearing identity before the flush closes the window in which a
-        // concurrent emission between flush and identity-reset would still
-        // stamp the prior user's ids onto a customer-collector record.
-        xai_grok_telemetry::external::set_identity(
-            xai_grok_telemetry::external::IdentityAttrs::default(),
-        );
-        xai_grok_telemetry::external::flush();
         if let Some(scope) = scope {
             auth_manager.remove_scope(scope)?;
         } else {

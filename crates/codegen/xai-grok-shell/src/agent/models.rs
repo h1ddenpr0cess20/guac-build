@@ -610,7 +610,6 @@ impl ModelsManager {
     /// Respects the auth snapshot / hot-swap discipline.
     pub async fn on_auth_changed(&self) {
         let config = self.inner.cfg.read().clone();
-        crate::agent::init::update_telemetry_config(&config, &self.inner.auth_manager);
         self.inner.cache.invalidate();
         let has_session = self.inner.auth_manager.current_or_expired().is_some();
         let fetch_auth = ModelFetchAuth::resolve(&config.endpoints, has_session);

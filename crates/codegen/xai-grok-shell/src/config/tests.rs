@@ -1998,72 +1998,6 @@ fn zdr_incompatible_tools_env_overrides_toml_false() {
     );
 }
 #[test]
-fn zdr_video_output_s3_deserializes_from_tools_block() {
-    let config: toml::Value = toml::from_str(
-            r#"
-            [tools]
-            disable_zdr_incompatible_tools = true
-
-            [tools.zdr_video_output_s3]
-            bucket = "team-videos"
-            endpoint = "https://s3.example.com"
-            region = "us-east-1"
-
-            [tools.zdr_video_output_s3.read_write]
-            access_key_id = "AKIA..."
-            secret_access_key = "secret"
-            "#,
-        )
-        .unwrap();
-    let tc = ToolsConfig::resolve(&config);
-    let s3 = tc.zdr_video_output_s3.expect("zdr_video_output_s3 should deserialize");
-    assert_eq!(s3.bucket, "team-videos");
-    assert!(s3.is_valid());
-}
-#[test]
-fn incomplete_zdr_video_output_s3_is_ignored() {
-    without_grok_respect_gitignore(|| {
-        let config: toml::Value = toml::from_str(
-                r#"
-                [tools]
-                disable_zdr_incompatible_tools = true
-
-                [tools.zdr_video_output_s3]
-                bucket = "team-videos"
-                "#,
-            )
-            .unwrap();
-        let tc = ToolsConfig::resolve(&config);
-        assert!(tc.zdr_video_output_s3.is_none());
-        assert!(
-                tc.disable_zdr_incompatible_tools,
-                "incomplete zdr_video_output_s3 must not drop disable_zdr_incompatible_tools"
-            );
-    });
-}
-#[test]
-fn malformed_zdr_video_output_s3_preserves_zdr_flag() {
-    without_grok_respect_gitignore(|| {
-        let config: toml::Value = toml::from_str(
-                r#"
-                [tools]
-                disable_zdr_incompatible_tools = true
-                respect_gitignore = true
-
-                [tools.zdr_video_output_s3]
-                bucket = "team-videos"
-                endpoint = "https://s3.example.com"
-                region = "us-east-1"
-                "#,
-            )
-            .unwrap();
-        let tc = ToolsConfig::resolve(&config);
-        assert!(tc.zdr_video_output_s3.is_none());
-        assert!(tc.disable_zdr_incompatible_tools);
-        assert!(tc.respect_gitignore);
-    });
-}
-#[test]
 fn roles_parse_from_toml() {
     let toml_str = r#"
             [roles.researcher]
@@ -3055,7 +2989,7 @@ fn apply_requirements_value_overrides_user_settings() {
     let mut cfg = crate::agent::config::Config::new_from_toml_cfg(&raw_config).unwrap();
     cfg.default_yolo_mode = true;
     let requirements: toml::Value = toml::from_str(
-            "[cli]\nauto_update = false\nchannel = \"stable\"\n\n[features]\ntelemetry = false\nfeedback = false\nlsp_tools = false\nweb_fetch = false\nwrite_file = false\nremote_fetch = false\n\n[telemetry]\ntrace_upload = false\nmixpanel_enabled = false\nmixpanel_token = \"enterprise-mp-token\"\n\n[ui]\nyolo = false\n\n[models]\ndefault = \"managed-model\"\nweb_search = \"managed-ws-model\"\n\n[endpoints]\ncli_chat_proxy_base_url = \"https://managed-proxy.example/v1\"\nxai_api_base_url = \"https://managed-api.example/v1\"\nmodels_base_url = \"https://managed-models.example/v1\"\nmodels_list_url = \"https://managed-models.example/v1/models\"\ndeployment_key = \"enterprise-deploy-key-should-not-log\"\ntrace_upload_endpoint_url = \"https://s3.custom.example.com\"\ntrace_upload_credentials = '{\"aws_access_key_id\":\"AKTEST\",\"aws_secret_access_key\":\"secret\"}'\n",
+            "[cli]\nauto_update = false\nchannel = \"stable\"\n\n[features]\ntelemetry = false\nfeedback = false\nlsp_tools = false\nweb_fetch = false\nwrite_file = false\nremote_fetch = false\n\n[telemetry]\ntrace_upload = false\n\n[ui]\nyolo = false\n\n[models]\ndefault = \"managed-model\"\nweb_search = \"managed-ws-model\"\n\n[endpoints]\ncli_chat_proxy_base_url = \"https://managed-proxy.example/v1\"\nxai_api_base_url = \"https://managed-api.example/v1\"\nmodels_base_url = \"https://managed-models.example/v1\"\nmodels_list_url = \"https://managed-models.example/v1/models\"\ndeployment_key = \"enterprise-deploy-key-should-not-log\"\ntrace_upload_endpoint_url = \"https://s3.custom.example.com\"\ntrace_upload_credentials = '{\"aws_access_key_id\":\"AKTEST\",\"aws_secret_access_key\":\"secret\"}'\n",
         )
         .unwrap();
     let source = RequirementSource::Requirements {
@@ -3133,16 +3067,6 @@ fn apply_requirements_value_overrides_user_settings() {
                 .all(|e| e.path != "endpoints.deployment_key"
                     || e.value != "enterprise-deploy-key-should-not-log"),
             "raw deployment_key must not appear in enforced audit entries"
-        );
-    assert!(!cfg.telemetry.mixpanel_enabled);
-    assert_eq!(
-            Some("enterprise-mp-token"),
-            cfg.telemetry.mixpanel_token.as_deref()
-        );
-    assert!(
-            enforced
-                .iter()
-                .any(|e| e.path == "telemetry.mixpanel_token" && e.value == "[redacted]")
         );
 }
 /// Strict precedence: requirement always wins (covers from-None and

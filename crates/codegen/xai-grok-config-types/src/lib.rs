@@ -514,12 +514,6 @@ pub struct RemoteSettings {
     pub dream_min_sessions: Option<u64>,
     #[serde(default)]
     pub dream_check_interval_secs: Option<u64>,
-    /// Cadence (seconds) of the pager's free→paid subscription watch.
-    /// `0` disables it; the pager clamps and defaults (see its
-    /// `app::subscription` module). Forwarded from the `grok_build_settings`
-    /// remote settings flag via the CCP `/settings` flatten catch-all.
-    #[serde(default)]
-    pub subscription_watch_interval_secs: Option<u64>,
     #[serde(default)]
     pub writeback_enabled: Option<bool>,
     /// OAuth2 provider issuer URL (e.g., "https://auth.x.ai"). When present
@@ -703,7 +697,7 @@ pub struct RemoteSettings {
     /// per-run and never persisted, so a remote "enable" could never reach
     /// init; org-wide enable ships via managed config instead. Applied
     /// in-process (tighten-only) via
-    /// `xai_grok_telemetry::external::apply_remote_policy`.
+    /// the external OTEL remote policy (removed).
     #[serde(default)]
     pub external_otel_disabled: Option<bool>,
     /// Force the external stream's content gates (`OTEL_LOG_USER_PROMPTS`,
@@ -813,13 +807,12 @@ pub struct RemoteSettings {
     /// `image_gen` / `/imagine`. `None` → env / `[features]` / default on.
     #[serde(default)]
     pub image_gen_enabled: Option<bool>,
-    /// remote settings flag: optional Imagine model override for `image_gen`.
-    /// When present and non-empty, `image_gen` uses this model slug
-    /// (e.g. `grok-imagine-image`) instead of the default quality model
-    /// (`grok-imagine-image-quality`). Absent/empty → default model.
+    /// Optional model override for `image_gen`. When present and non-empty,
+    /// `image_gen` uses this model slug (e.g. `emu-image`) instead of the
+    /// default quality model (`emu-image-quality`). Absent/empty → default.
     #[serde(default)]
     pub image_gen_model_override: Option<String>,
-    /// Optional Imagine model override for `image_edit`. Absent/empty → default.
+    /// Optional model override for `image_edit`. Absent/empty → default.
     #[serde(default)]
     pub image_edit_model_override: Option<String>,
     /// Video tools / `/imagine-video`. `None` → env / `[features]` / default on.
@@ -883,7 +876,7 @@ pub struct RemoteSettings {
     pub sharing_enabled: Option<bool>,
     /// Voice mode (STT dictation). Client default is **on** when absent.
     /// `Some(false)` is a remote kill switch; `Some(true)` forces on.
-    /// Overridable locally via `GROK_VOICE_MODE`. Free-tier SuperGrok upsell
+    /// Overridable locally via `GROK_VOICE_MODE`.
     /// is a separate client tier gate.
     #[serde(default)]
     pub voice_mode_enabled: Option<bool>,
@@ -950,32 +943,14 @@ pub struct RemoteSettings {
     #[serde(default)]
     pub permission_mode: Option<String>,
     /// User's subscription tier from remote settings `grok_build_access_gate`.
-    /// E.g. "free", "premium", "supergrok", "supergrok_heavy".
+    /// E.g. "free", "premium", "pro".
     /// Stamped on analytics events + user profile for filtering.
     #[serde(default)]
     pub subscription_tier: Option<String>,
-    #[serde(default)]
-    pub gate_message: Option<String>,
-    #[serde(default)]
-    pub gate_url: Option<String>,
-    #[serde(default)]
-    pub gate_label: Option<String>,
     /// Whether the session picker groups entries by repo name.
     /// When `None` or `Some(false)`, sessions are shown in a flat list.
     #[serde(default)]
     pub session_picker_grouped: Option<bool>,
-    /// Whether the user is allowed to use Grok Build. Set by remote settings
-    /// `grok_build_access_gate` targeting rules. `None` = no server response
-    /// yet (client uses own fallback check). `Some(false)` = blocked.
-    #[serde(default)]
-    pub allow_access: Option<bool>,
-    /// User-friendly display name for the current subscription tier
-    /// (e.g. "SuperGrok", "X Premium+", "Free", "API Key"). Set by CCP
-    /// from the JWT tier claim (OAuth) or credential kind (API key).
-    /// Free/Invalid OAuth → `"Free"`; API keys → `"API Key"` (Mixpanel
-    /// `api_key`, never free).
-    #[serde(default)]
-    pub subscription_tier_display: Option<String>,
     /// Whether on-demand credit usage is enabled. When `Some(false)`, the
     /// billing extension blocks on-demand cap changes.
     #[serde(default)]
@@ -1021,13 +996,6 @@ pub struct RemoteSettings {
     pub compaction_verbatim_input: Option<bool>,
     #[serde(default)]
     pub compaction_tool_choice: Option<String>,
-    /// remote settings denylist of optional imagine tools to disable
-    /// (e.g. `["image_edit"]`). When a tool is listed it is authoritatively
-    /// removed from the toolset and local env/config can't re-enable it.
-    /// Absent or not listed → each tool keeps its own default.
-    /// See `Config::resolve_image_edit`.
-    #[serde(default)]
-    pub imagine_tools_disabled: Option<Vec<String>>,
     /// remote settings gate for the `grok workspace` CLI command (Computer Hub
     /// workspace exposure), from `grok_build_settings.workspace_command_enabled`.
     /// `Some(true)` enables it; `None`/`Some(false)` (the default) keep it off.
@@ -1044,16 +1012,6 @@ pub struct RemoteSettings {
     /// Stats poll interval in seconds when set.
     #[serde(default)]
     pub jemalloc_heap_profile_poll_interval_secs: Option<u64>,
-}
-impl RemoteSettings {
-    /// Denylist check for an optional imagine tool. Returns `true` when the
-    /// server sent `imagine_tools_disabled` and it contains `tool` (force-off);
-    /// otherwise `false` (defer to the tool's own default).
-    pub fn imagine_tool_disabled(&self, tool: &str) -> bool {
-        self.imagine_tools_disabled
-            .as_ref()
-            .is_some_and(|list| list.iter().any(|t| t == tool))
-    }
 }
 /// Remote enable tier for the per-tip contextual hints (mirrors the client's
 /// `[ui.contextual_hints]` shape). Each field is a soft default for one tip;

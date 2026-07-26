@@ -2054,7 +2054,6 @@ fn media_gen_block(tc: &acp::ToolCall, success: bool) -> RenderBlock {
     RenderBlock::ToolCall(ToolCallBlock::Other(block))
 }
 /// Plain-text body of a media-variant tool that returned `ToolOutput::Text`
-/// rather than a media file (the free / X Basic SuperGrok-upsell short-circuit).
 /// `None` for real media outputs — including ZDR upload-only results — so their
 /// typed rendering is untouched.
 fn media_gen_text(tc: &acp::ToolCall) -> Option<String> {
@@ -2066,7 +2065,7 @@ fn media_gen_text(tc: &acp::ToolCall) -> Option<String> {
 /// Local `(path, is_video)` from typed `raw_output`.
 ///
 /// Returns `None` when `raw_output` is missing/unparseable, not a media
-/// variant, or has no openable local file (ZDR `uploaded_url` / empty path).
+/// variant, or has no openable local file (empty path).
 fn media_gen_ref(tc: &acp::ToolCall) -> Option<(std::path::PathBuf, bool)> {
     let (media, is_video) =
         match serde_json::from_value::<ToolOutput>(tc.raw_output.clone()?).ok()? {
@@ -2074,7 +2073,7 @@ fn media_gen_ref(tc: &acp::ToolCall) -> Option<(std::path::PathBuf, bool)> {
             ToolOutput::ImageToVideo(m) | ToolOutput::ReferenceToVideo(m) => (m, true),
             _ => return None,
         };
-    if media.uploaded_url.is_some() || media.path.as_os_str().is_empty() {
+    if media.path.as_os_str().is_empty() {
         return None;
     }
     Some((media.path, is_video))
@@ -6623,65 +6622,5 @@ mod tests {
                 "{variant}: open path must be the typed MediaGenOutput.path"
             );
         }
-    }
-    #[test]
-    fn media_gen_ref_skips_uploaded_only_video() {
-        let output =
-            ToolOutput::ImageToVideo(xai_grok_tools::types::output::MediaGenOutput::uploaded(
-                "https://bucket.example/videos/x.mp4".into(),
-            ));
-        let tc = acp::ToolCall::new(
-            acp::ToolCallId::new(Arc::from("zdr-upload")),
-            "image_to_video",
-        )
-        .kind(acp::ToolKind::Other)
-        .status(acp::ToolCallStatus::Completed)
-        .content(vec![])
-        .raw_input(Some(serde_json::json!({ "variant": "ImageToVideo" })))
-        .raw_output(serde_json::to_value(output).ok())
-        .locations(vec![]);
-        assert!(
-            media_gen_ref(&tc).is_none(),
-            "uploaded_url-only media must not claim a local open path"
-        );
-    }
-    /// A tier-restricted (free / X Basic) imagine call short-circuits with the
-    /// SuperGrok upsell as `ToolOutput::Text` on a `Completed` status. The media
-    /// renderer has no file to open, so it must surface the upsell text in the
-    /// card body (not a bare title) and must NOT mark the card as an error.
-    #[test]
-    fn tier_restricted_media_shows_upsell_text_not_error() {
-        let upsell = "Image generation is a SuperGrok feature. Upgrade at \
-             https://grok.com/supergrok?referrer=grok-build";
-        let output = ToolOutput::Text(xai_grok_tools::types::output::TextOutput::from(upsell));
-        let tc = acp::ToolCall::new(
-            acp::ToolCallId::new(Arc::from("tier-restricted-img")),
-            "image_gen",
-        )
-        .kind(acp::ToolKind::Other)
-        .status(acp::ToolCallStatus::Completed)
-        .content(vec![acp::ToolCallContent::Content(acp::Content::new(
-            acp::ContentBlock::Text(acp::TextContent::new(upsell)),
-        ))])
-        .raw_input(Some(serde_json::json!({ "variant": "ImageGen" })))
-        .raw_output(serde_json::to_value(output).ok())
-        .locations(vec![]);
-        let RenderBlock::ToolCall(ToolCallBlock::Other(block)) = tool_call_to_block(&tc, None)
-        else {
-            panic!("expected an Other tool-call block");
-        };
-        assert!(
-            block.is_success(),
-            "the upsell is a successful result, not an error"
-        );
-        assert!(
-            block
-                .output
-                .as_deref()
-                .unwrap_or_default()
-                .contains("SuperGrok"),
-            "upsell text must be shown in the card body, got: {:?}",
-            block.output
-        );
     }
 }

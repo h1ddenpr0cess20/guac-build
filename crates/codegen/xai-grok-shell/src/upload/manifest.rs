@@ -17,14 +17,12 @@ pub(crate) enum ArtifactStatus {
 pub(crate) enum ManifestUploadMethod {
     Proxy,
     Direct,
-    S3,
 }
 impl ManifestUploadMethod {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Proxy => "proxy",
             Self::Direct => "direct",
-            Self::S3 => "s3",
         }
     }
 }
@@ -167,7 +165,6 @@ pub(crate) fn resolve_upload_method(ctx: &PromptTraceContext) -> ManifestUploadM
     match &ctx.gcs_config.upload_method {
         crate::session::repo_changes::UploadMethod::Proxy { .. } => ManifestUploadMethod::Proxy,
         crate::session::repo_changes::UploadMethod::Direct { .. } => ManifestUploadMethod::Direct,
-        crate::session::repo_changes::UploadMethod::S3 { .. } => ManifestUploadMethod::S3,
     }
 }
 pub(crate) async fn write_error_manifest(ctx: &PromptTraceContext) {
@@ -260,7 +257,7 @@ mod tests {
         let tracker = new_artifact_tracker();
         record_artifact(&tracker, "metadata.json", ArtifactResult::Succeeded);
         record_artifact(&tracker, "turn_result.json", ArtifactResult::Enqueued);
-        let manifest = build_manifest(&tracker, ManifestUploadMethod::S3);
+        let manifest = build_manifest(&tracker, ManifestUploadMethod::Direct);
         assert!(manifest.fully_uploaded);
         let json: serde_json::Value = serde_json::to_value(&manifest).unwrap();
         assert_eq!(json["artifacts"]["turn_result.json"], "enqueued");
@@ -338,11 +335,11 @@ mod tests {
                 error: Some("HTTP 503: service unavailable"),
             },
         );
-        let manifest = build_manifest(&tracker, ManifestUploadMethod::S3);
+        let manifest = build_manifest(&tracker, ManifestUploadMethod::Direct);
         let json: serde_json::Value = serde_json::to_value(&manifest).unwrap();
         assert_eq!(json["schema_version"], 3);
         assert_eq!(json["fully_uploaded"], false);
-        assert_eq!(json["upload_method"], "s3");
+        assert_eq!(json["upload_method"], "direct");
         assert_eq!(json["artifacts"]["turn_messages.json"], "succeeded");
         assert_eq!(json["artifacts"]["memory.tar.gz"], "skipped");
         assert_eq!(json["artifacts"]["metadata.json"], "failed");
@@ -417,11 +414,7 @@ mod tests {
     }
     #[test]
     fn upload_method_as_str_matches_serde() {
-        for method in [
-            ManifestUploadMethod::Proxy,
-            ManifestUploadMethod::Direct,
-            ManifestUploadMethod::S3,
-        ] {
+        for method in [ManifestUploadMethod::Proxy, ManifestUploadMethod::Direct] {
             let serde_str = serde_json::to_value(method)
                 .unwrap()
                 .as_str()

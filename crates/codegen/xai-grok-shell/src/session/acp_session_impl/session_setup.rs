@@ -358,7 +358,7 @@ impl SessionActor {
         };
         let current_model = &current_config.model;
         let base_url = &current_config.base_url;
-        if !crate::util::is_cli_chat_proxy_url(base_url) {
+        if !crate::util::serves_first_party_api_extensions(base_url) {
             return;
         }
         tracing::info!(
@@ -397,7 +397,7 @@ impl SessionActor {
         let mut request = middleware_client
             .get(&url)
             .header("X-XAI-Token-Auth", "xai-grok-cli")
-            .header("x-grok-client-version", xai_grok_version::VERSION)
+            .header("x-guac-client-version", xai_grok_version::VERSION)
             .header(
                 crate::http::CLIENT_MODE_HEADER,
                 crate::http::process_client_mode(),

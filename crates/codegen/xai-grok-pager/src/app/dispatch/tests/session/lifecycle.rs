@@ -122,49 +122,6 @@ fn send_prompt_without_session_queues_but_no_effect() {
     assert_eq!(app.agents[&id].session.pending_prompts[0].text, "hello");
 }
 #[test]
-fn session_created_sets_session_id() {
-    let mut app = test_app_with_agent();
-    app.plugin_cta_enabled = true;
-    let id = AgentId(0);
-    app.agents.get_mut(&id).unwrap().session.session_id = None;
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::SessionCreated {
-            agent_id: id,
-            session_id: "new-session-123".into(),
-            models: None,
-        }),
-        &mut app,
-    );
-    assert_eq!(effects.len(), 7);
-    assert!(matches!(
-        &effects[0],
-        Effect::FetchPromptHistory { session_id, .. } if session_id == "new-session-123"
-    ));
-    assert!(matches!(&effects[1], Effect::FetchSessionAgentName { .. }));
-    assert!(matches!(
-        &effects[2],
-        Effect::RefreshAvailableCommands { .. }
-    ));
-    assert!(matches!(
-        &effects[3],
-        Effect::CheckMarketplaceUpdates { .. }
-    ));
-    assert!(matches!(&effects[4], Effect::FetchPluginCtaCatalog { .. }));
-    assert!(matches!(
-        &effects[5],
-        Effect::FetchBilling { silent: true, .. }
-    ));
-    assert!(matches!(&effects[6], Effect::RegisterActiveSession { .. }));
-    assert_eq!(
-        app.agents[&id]
-            .session
-            .session_id
-            .as_ref()
-            .map(|s| s.0.as_ref()),
-        Some("new-session-123")
-    );
-}
-#[test]
 fn session_created_omits_cta_catalog_when_disabled() {
     let mut app = test_app_with_agent();
     assert!(!app.plugin_cta_enabled);
@@ -278,62 +235,6 @@ fn new_worktree_session_creates_agent_and_returns_effect() {
         app.agents[&AgentId(0)].session.state,
         AgentState::CommandRunning { .. }
     ));
-}
-#[test]
-fn worktree_session_created_sets_session_and_cwd() {
-    let mut app = test_app_git();
-    dispatch(
-        Action::NewWorktreeSession {
-            load_session_id: None,
-            label: None,
-            git_ref: None,
-        },
-        &mut app,
-    );
-    let id = AgentId(0);
-    let worktree_path = PathBuf::from("/tmp/grok-worktrees/pager-123");
-    let session_cwd = worktree_path.clone();
-    let effects = dispatch(
-        Action::TaskComplete(TaskResult::WorktreeSessionCreated {
-            agent_id: id,
-            session_id: acp::SessionId::new("wt-session-1"),
-            worktree_path: worktree_path.clone(),
-            session_cwd: session_cwd.clone(),
-            models: None,
-        }),
-        &mut app,
-    );
-    assert!(
-        effects
-            .iter()
-            .any(|e| matches!(e, Effect::FetchPromptHistory { .. }))
-    );
-    assert!(
-        effects
-            .iter()
-            .any(|e| matches!(e, Effect::FetchSessionAgentName { .. }))
-    );
-    assert!(
-        effects
-            .iter()
-            .any(|e| matches!(e, Effect::FetchBilling { silent: true, .. }))
-    );
-    assert!(
-        effects
-            .iter()
-            .any(|e| matches!(e, Effect::RegisterActiveSession { .. }))
-    );
-    assert_eq!(
-        app.agents[&id]
-            .session
-            .session_id
-            .as_ref()
-            .map(|s| s.0.as_ref()),
-        Some("wt-session-1")
-    );
-    assert_eq!(app.agents[&id].session.cwd, session_cwd);
-    assert_eq!(app.agents[&id].scrollback.len(), 1);
-    assert!(app.agents[&id].session.state.is_idle());
 }
 #[test]
 fn worktree_session_preserves_subdirectory_offset() {

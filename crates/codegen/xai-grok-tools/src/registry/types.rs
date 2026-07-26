@@ -1028,7 +1028,6 @@ impl ToolRegistryBuilder {
                 ctx.api_key_provider.clone(),
             ) {
                 Ok(client) => {
-                    let client = client.with_attribution_callback(ctx.attribution_callback.clone());
                     resources.insert(client);
                 }
                 Err(e) => {
@@ -1042,7 +1041,6 @@ impl ToolRegistryBuilder {
                 ctx.api_key_provider.clone(),
             ) {
                 Ok(client) => {
-                    let client = client.with_attribution_callback(ctx.attribution_callback.clone());
                     resources.insert(client);
                 }
                 Err(e) => {

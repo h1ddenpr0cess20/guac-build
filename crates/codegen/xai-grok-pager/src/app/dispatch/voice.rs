@@ -40,35 +40,6 @@ fn voice_target_for_view(app: &AppView) -> Option<VoiceTarget> {
     }
 }
 
-/// Show the SuperGrok upsell when a tier-restricted (free / X Basic) user tries
-/// to start voice via the Ctrl+Space / F8 keybinding, which bypasses the slash
-/// registry (`/voice` is instead hidden + upsold via the deny list). Mirrors the
-/// slash-command upsell surfaces: a Q&A modal on an agent screen
-/// ([`super::billing::open_restricted_command_upsell`]), the feedback toast on
-/// the dashboard (which has no modal surface), and a silent no-op elsewhere
-/// (e.g. the welcome screen, which has no agent to host the modal). Never starts
-/// voice; always returns no effects.
-fn open_voice_tier_upsell(app: &mut AppView) -> Vec<Effect> {
-    let login_method = app.login_method_id.as_ref().map(|id| id.0.to_string());
-    match app.active_view {
-        ActiveView::Agent(id) => {
-            if let Some(agent) = app.agents.get_mut(&id) {
-                super::billing::open_restricted_command_upsell(agent, login_method);
-            }
-        }
-        ActiveView::AgentDashboard => {
-            if let Some(d) = app.dashboard.as_mut() {
-                d.set_error_toast(&format!(
-                    "/voice requires SuperGrok — upgrade at {}",
-                    super::billing::UPSELL_URL_UPGRADE
-                ));
-            }
-        }
-        _ => {}
-    }
-    vec![]
-}
-
 /// Enable session voice mode and start recording. The start primitive reached
 /// by the toggle ([`dispatch_voice_toggle`], i.e. `/voice` / Ctrl+Space when
 /// idle) and the Ctrl+Space hold-to-talk key-press.
@@ -77,7 +48,6 @@ fn open_voice_tier_upsell(app: &mut AppView) -> Vec<Effect> {
 /// voice isn't available (flag off, or a build without audio capture) this is a
 /// **silent no-op** — no toast — so users who don't have the feature see
 /// nothing. When the feature IS available but the user is on a restricted tier
-/// (free / X Basic), it shows the SuperGrok upsell instead of starting a session
 /// (see [`open_voice_tier_upsell`]) — this is the enforcement point for the
 /// keybinding, which bypasses the slash registry. Otherwise dictation routes
 /// into a prompt box: the active agent's prompt, or the dashboard's dispatch
@@ -98,11 +68,7 @@ pub(super) fn dispatch_enable_voice_mode(app: &mut AppView, from_hold: bool) -> 
     // Tier gate: free / X Basic personal users can't use voice (the server
     // zero-limits these tiers). The Ctrl+Space / F8 keybinding bypasses the
     // slash registry, so this is the enforcement point for it — show the
-    // SuperGrok upsell instead of starting a doomed session (`/voice` itself is
     // separately hidden + upsold via the deny list).
-    if app.is_voice_tier_restricted() {
-        return open_voice_tier_upsell(app);
-    }
     // The session-less welcome screen (first launch) has no prompt box, so create
     // a session there — via the gated `dispatch_new_session`, so auth + folder-trust
     // hold — letting voice dictate into it from a cold start. `switch_to_agent`

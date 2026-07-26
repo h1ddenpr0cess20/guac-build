@@ -291,7 +291,7 @@ pub fn try_open_url(url: &str, filter: SchemeFilter) -> OpenUrlResult {
 /// failure, the original string is returned unchanged so this is safe to apply
 /// to opener input from untrusted sources.
 ///
-/// Used by the SuperGrok upsell flow to attribute clicks to `referrer=grok-build`,
+/// Attaches a referrer query parameter to an outbound link,
 /// matching the OAuth consent screen and x.ai/cli marketing links regardless of
 /// what the remote settings `gate_url` value happens to be.
 pub fn ensure_query_param(url: &str, key: &str, value: &str) -> String {
@@ -459,51 +459,51 @@ mod tests {
 
     #[test]
     fn ensure_query_param_appends_when_missing() {
-        let out = ensure_query_param("https://grok.com/supergrok", "referrer", "grok-build");
-        assert_eq!(out, "https://grok.com/supergrok?referrer=grok-build");
+        let out = ensure_query_param("https://example.invalid/upgrade", "referrer", "guac-build");
+        assert_eq!(out, "https://example.invalid/upgrade?referrer=guac-build");
     }
 
     #[test]
     fn ensure_query_param_preserves_existing_value() {
         let out = ensure_query_param(
-            "https://grok.com/supergrok?referrer=other",
+            "https://example.invalid/upgrade?referrer=other",
             "referrer",
             "grok-build",
         );
-        assert_eq!(out, "https://grok.com/supergrok?referrer=other");
+        assert_eq!(out, "https://example.invalid/upgrade?referrer=other");
     }
 
     #[test]
     fn ensure_query_param_keeps_other_query_pairs() {
         let out = ensure_query_param(
-            "https://grok.com/supergrok?heavy=1",
+            "https://example.invalid/upgrade?heavy=1",
             "referrer",
             "grok-build",
         );
         assert_eq!(
             out,
-            "https://grok.com/supergrok?heavy=1&referrer=grok-build"
+            "https://example.invalid/upgrade?heavy=1&referrer=guac-build"
         );
     }
 
     #[test]
     fn ensure_query_param_preserves_fragment() {
         // The current remote settings value uses a hash fragment for client-side
-        // routing (`grok.com/#supergrok`); we still want the referrer attached.
-        let out = ensure_query_param("https://grok.com/#supergrok", "referrer", "grok-build");
-        assert_eq!(out, "https://grok.com/?referrer=grok-build#supergrok");
+        // routing (`example.invalid/#upgrade`); we still want the referrer attached.
+        let out = ensure_query_param("https://example.invalid/#upgrade", "referrer", "guac-build");
+        assert_eq!(out, "https://example.invalid/?referrer=guac-build#upgrade");
     }
 
     #[test]
     fn ensure_query_param_returns_unchanged_on_parse_failure() {
-        let out = ensure_query_param("not a url", "referrer", "grok-build");
+        let out = ensure_query_param("not a url", "referrer", "guac-build");
         assert_eq!(out, "not a url");
     }
 
     #[test]
     fn ensure_query_param_url_encodes_value() {
-        let out = ensure_query_param("https://grok.com/supergrok", "referrer", "grok build");
-        assert_eq!(out, "https://grok.com/supergrok?referrer=grok+build");
+        let out = ensure_query_param("https://example.invalid/upgrade", "referrer", "guac build");
+        assert_eq!(out, "https://example.invalid/upgrade?referrer=guac+build");
     }
 
     #[test]
@@ -568,7 +568,7 @@ mod tests {
 
     #[test]
     fn browser_unavailable_message_includes_full_url() {
-        let url = "https://grok.com/supergrok?referrer=grok-build";
+        let url = "https://example.invalid/upgrade?referrer=guac-build";
         let msg = browser_unavailable_message(url);
         assert!(msg.contains("Could not open a browser"));
         assert!(msg.contains(url));

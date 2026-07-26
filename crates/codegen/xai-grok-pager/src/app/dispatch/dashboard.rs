@@ -54,16 +54,6 @@ pub(super) fn ensure_dashboard_state(app: &mut AppView) {
     state.set_screen_mode(app.screen_mode);
     state.set_recap_visible(app.session_recap_available);
     state.set_voice_visible(app.voice_mode_enabled);
-    state.set_restricted_commands(&app.tier_restricted_commands);
-    let billing = app.usage_visible;
-    state
-        .dispatch
-        .slash_controller
-        .set_billing_surface_visible(billing);
-    state
-        .peek_reply
-        .slash_controller
-        .set_billing_surface_visible(billing);
     app.dashboard = Some(state);
 }
 
@@ -165,7 +155,6 @@ pub(super) fn dispatch_open_dashboard(app: &mut AppView) -> Vec<Effect> {
         d.gc_stale_refs(&dashboard_alive_fn(&app.agents));
         d.set_recap_visible(app.session_recap_available);
         d.set_voice_visible(app.voice_mode_enabled);
-        d.set_restricted_commands(&app.tier_restricted_commands);
     }
     // Refresh each local agent's git context (branch / worktree / label)
     // from disk so the row subtitles show the LATEST branch and worktree
@@ -1339,10 +1328,7 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
             let token = invocation.token.to_string();
             if let Some(d) = app.dashboard.as_mut() {
                 d.dispatch.set_text("");
-                d.set_error_toast(&format!(
-                    "/{token} requires SuperGrok — upgrade at {}",
-                    super::billing::UPSELL_URL_UPGRADE
-                ));
+                d.set_error_toast(&format!("/{token} is not available"));
             }
             return vec![];
         }
@@ -1382,7 +1368,6 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
             session_id: None,
             bundle_state: &app.bundle_state,
             screen_mode: app.screen_mode,
-            billing_surface_visible: app.usage_visible,
             pager_state: crate::settings::PagerLocalSnapshot {
                 multiline_mode: dashboard_multiline,
                 yolo_mode: app.default_yolo,

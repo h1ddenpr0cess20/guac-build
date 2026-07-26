@@ -105,21 +105,6 @@ pub enum LocalQuestionKind {
     /// On submit, the selected option index is translated into an
     /// [`crate::app::actions::Action::NewSessionAnswered`].
     NewSession,
-    /// Modal shown when the user hits the credit/rate limit (403).
-    /// Options map to upsell URLs: upgrade tier or enable on-demand.
-    /// `choices` maps each option index to a telemetry choice variant.
-    CreditLimitUpsell {
-        choices: Vec<xai_grok_telemetry::events::CreditLimitChoice>,
-    },
-    /// SuperGrok upsell modal: the free-usage paywall (429 +
-    /// `subscription:free-usage-exhausted`) or a tier-restricted slash
-    /// command invocation. Upgrade options carry their URL in the option
-    /// `id`.
-    FreeUsageUpsell {
-        /// Telemetry source for `SuperGrokUpsellClicked` — distinguishes
-        /// the paywall from the restricted-command upsell.
-        source: xai_grok_telemetry::events::SuperGrokUpsell,
-    },
     /// Modal shown when the shell rejects a model switch due to agent
     /// type incompatibility. Carries the target model + effort so the
     /// answer handler can create a new session with it.
@@ -743,7 +728,7 @@ impl QuestionViewState {
     /// the current freeform text so the caller can load it into the prompt.
     ///
     /// No-op returning an empty string when `no_freeform` is set: such
-    /// questions (e.g. the SuperGrok upsell) have no freeform row, so
+    /// questions have no freeform row, so
     /// `InputMode` must be unreachable. Callers gate on `no_freeform` /
     /// [`Self::is_on_freeform_row`] too; this is defense in depth.
     pub fn activate_freeform_input(&mut self) -> String {
@@ -2564,7 +2549,7 @@ mod tests {
 
     // ── no_freeform ────────────────────────────────────────────────────
 
-    /// `no_freeform` questions (e.g. the SuperGrok upsell) have no "Other"
+    /// `no_freeform` questions have no "Other"
     /// row, so activating freeform input must be impossible: focus stays in
     /// Navigation and nothing gets marked selected. Regression test for the
     /// upsell modal letting the user type after clicking under the last

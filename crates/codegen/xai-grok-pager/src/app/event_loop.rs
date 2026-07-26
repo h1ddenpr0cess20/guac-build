@@ -60,7 +60,6 @@ pub(crate) struct TerminalState {
 /// Result of the event loop run.
 pub(crate) struct RunResult {
     pub exit_info: Option<super::ExitInfo>,
-    pub quit_for_update: bool,
     /// When set, the process should re-exec into the other screen mode after
     /// terminal restore. See `/minimal` and `/fullscreen`.
     pub relaunch: Option<super::app_view::ScreenModeRelaunch>,
@@ -722,9 +721,6 @@ pub(crate) async fn run(
     remote_settings: Option<xai_grok_shell::util::config::RemoteSettings>,
     term_state: TerminalState,
     materialized: crate::app::session_startup::MaterializedStartup,
-    bg_update_rx: Option<
-        tokio::sync::oneshot::Receiver<Option<xai_grok_update::auto_update::UpdateAvailable>>,
-    >,
     mut writer_event_rx: tokio::sync::mpsc::UnboundedReceiver<crate::render::draw::WriterEvent>,
 ) -> anyhow::Result<RunResult> {
     // Initialize tracing capture. The channel `rx` will be wired to a
@@ -974,7 +970,7 @@ pub(crate) async fn run(
     // else: auth_state defaults to Done (already authenticated eagerly)
     // Effects stashed until after the initial render, so the user sees the
     // welcome/auth UI right away.
-    let mut post_render_effects = if needs_interactive_login {
+    let post_render_effects = if needs_interactive_login {
         if connection.auth_methods.is_empty() {
             // preferred_method pin unavailable — no advertised method to start.
             app.auth_state = super::app_view::AuthState::Pending {
@@ -1000,11 +996,6 @@ pub(crate) async fn run(
         app.is_api_key_auth = app.auth_methods.iter().any(|m| {
             m.id().0.as_ref() == xai_grok_shell::agent::auth_method::XAI_API_KEY_METHOD_ID
         });
-        // No AuthMeta on this path — API keys have no consumer billing surface.
-        if app.is_api_key_auth {
-            app.usage_visible = false;
-            app.sync_billing_surface_to_agents();
-        }
     }
 
     // After auth so API-key + managed policy resolve correctly.
@@ -1017,21 +1008,6 @@ pub(crate) async fn run(
         app.voice_ui_active = false;
     }
     app.apply_voice_mode_enabled(voice_mode_enabled);
-
-    // Fallback: prefetch may have gate info the shell's AuthMeta missed.
-    // Errs on the side of blocking if stale.
-    if app.gate.is_none()
-        && let Some(rs) = remote_settings.as_ref()
-    {
-        app.gate = AppView::gate_from_settings(rs);
-    }
-
-    // Re-impose the startup gate through the chokepoint: cached auth meta
-    // and the settings prefetch are both possibly stale, so a consumer
-    // session's gate is deferred for live verification before first paint.
-    if let Some(gate) = app.gate.take() {
-        post_render_effects.extend(app.impose_gate(gate));
-    }
 
     // Load persisted per-ID hidden state
     app.hidden_announcement_ids = xai_grok_announcements::read_hidden_announcement_ids().await;
@@ -1089,10 +1065,6 @@ pub(crate) async fn run(
         managed_config.as_ref(),
         remote_settings.as_ref(),
     );
-
-    app.subscription_watch_interval_secs = remote_settings
-        .as_ref()
-        .and_then(|rs| rs.subscription_watch_interval_secs);
 
     // Full layered resolve (env/requirements/remote may beat plain `[ui]`).
     crate::appearance::cache::set_show_thinking_blocks(
@@ -1511,20 +1483,6 @@ pub(crate) async fn run(
     // iteration so it is popped on every close path.
     let mut gboom_keyboard_pushed = false;
 
-    const BILLING_POLL_INTERVAL: Duration = Duration::from_secs(30);
-    let mut billing_poll_at: Option<Instant> = None;
-
-    const GATE_POLL_INTERVAL: Duration = Duration::from_secs(30);
-    let mut gate_poll_at: Option<Instant> = None;
-
-    // Free→paid subscription watch (see `app::subscription`).
-    let mut subscription_watch_at: Option<Instant> = if app.subscription_watch_wanted() {
-        app.subscription_watch_interval()
-            .map(|iv| Instant::now() + iv)
-    } else {
-        None
-    };
-
     // Leader-mode roster poll (FleetView dashboard). Only fires while the
     // dashboard is open AND we're connected via a leader. Armed to fire
     // immediately at loop start so an already-open dashboard refreshes
@@ -1562,21 +1520,11 @@ pub(crate) async fn run(
         if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
             return Ok(make_run_result(&app));
         }
-        // Fetch billing early so the welcome screen can show a credit warning.
-        if app.usage_visible {
-            let effs = vec![super::actions::Effect::FetchAppBilling];
-            if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-                return Ok(make_run_result(&app));
-            }
-        }
         // Fetch changelog off the render path so the welcome screen
         // can display bullets and /release-notes uses the cached result.
         let effs = vec![super::actions::Effect::FetchChangelog];
         if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
             return Ok(make_run_result(&app));
-        }
-        if !app.has_access() {
-            gate_poll_at = Some(Instant::now() + GATE_POLL_INTERVAL);
         }
     }
 
@@ -1790,10 +1738,6 @@ pub(crate) async fn run(
     // armed only when the startup query is still unanswered.
     let mut xt_filter = super::xt_filter::XtversionFilter::new();
 
-    // Background update check: resolves when the spawned update task
-    // determines whether a newer version is available.
-    let mut bg_update_rx = bg_update_rx;
-
     // `app::run` publishes the resolved theme into `theme_cache::CURRENT`
     // before `init_terminal` so `apply_cursor_color()` sees it. Pin the
     // invariant so a future refactor that drops the `theme_cache::set` call
@@ -1910,15 +1854,6 @@ pub(crate) async fn run(
             roster_poll_at = Some(Instant::now());
         }
 
-        // (Re-)arm the subscription watch on the dormant→wanted transition
-        // and after each fired tick.
-        if subscription_watch_at.is_none()
-            && app.subscription_watch_wanted()
-            && let Some(iv) = app.subscription_watch_interval()
-        {
-            subscription_watch_at = Some(Instant::now() + iv);
-        }
-
         // Future that sleeps until the next animation tick, or waits forever if none.
         let animation_tick = async {
             match animation_tick_at {
@@ -1974,27 +1909,6 @@ pub(crate) async fn run(
         };
         let suspend_retry = async move {
             match suspend_retry_at {
-                Some(at) => sleep_until(at).await,
-                None => std::future::pending().await,
-            }
-        };
-
-        let billing_poll = async {
-            match billing_poll_at {
-                Some(at) => sleep_until(at).await,
-                None => std::future::pending().await,
-            }
-        };
-
-        let gate_poll = async {
-            match gate_poll_at {
-                Some(at) => sleep_until(at).await,
-                None => std::future::pending().await,
-            }
-        };
-
-        let subscription_watch = async {
-            match subscription_watch_at {
                 Some(at) => sleep_until(at).await,
                 None => std::future::pending().await,
             }
@@ -2105,17 +2019,6 @@ pub(crate) async fn run(
                         schedule_tick(&mut animation_tick_at, &app, tick_interval);
                         resize_debounce_at = None;
 
-                        // Schedule/clear poll timers.
-                        if app.billing_poll_wanted && billing_poll_at.is_none() {
-                            billing_poll_at = Some(Instant::now() + BILLING_POLL_INTERVAL);
-                        } else if !app.billing_poll_wanted {
-                            billing_poll_at = None;
-                        }
-                        if !app.has_access() && gate_poll_at.is_none() {
-                            gate_poll_at = Some(Instant::now() + GATE_POLL_INTERVAL);
-                        } else if app.has_access() {
-                            gate_poll_at = None;
-                        }
 
                         presenter.request(false);
                     }
@@ -2140,32 +2043,6 @@ pub(crate) async fn run(
                     break;
                 }
                 presenter.request(false);
-            }
-
-            // Background update check completed.
-            result = async {
-                match bg_update_rx.as_mut() {
-                    Some(rx) => rx.await.ok().flatten(),
-                    None => std::future::pending().await,
-                }
-            } => {
-                // Consume the receiver so this arm becomes inert.
-                bg_update_rx = None;
-                if let Some(update) = result {
-                    tracing::info!(
-                        latest_version = %update.latest_version,
-                        "Background update check: newer version available"
-                    );
-                    let latest = update.latest_version;
-                    app.pending_update_version = Some(latest.clone());
-                    // The full TUI surfaces this on the welcome screen, which
-                    // minimal has none of — commit a one-line notice into
-                    // native scrollback instead (update notice).
-                    if term_state.screen_mode.is_minimal() {
-                        dispatch::commit_minimal_update_notice(&mut app, &latest);
-                    }
-                    presenter.request(false);
-                }
             }
 
             maybe_ev = input_rx.recv() => {
@@ -2270,41 +2147,6 @@ pub(crate) async fn run(
                 // Keep ticking as long as there are running animations
                 // or pending actions waiting to expire.
                 schedule_tick(&mut animation_tick_at, &app, tick_interval);
-            }
-
-            _ = billing_poll => {
-                billing_poll_at = None;
-                if let ActiveView::Agent(id) = app.active_view {
-                    let effs = vec![Effect::FetchBilling {
-                        agent_id: id,
-                        silent: true,
-                    }];
-                    if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-                        break;
-                    }
-                }
-                if app.billing_poll_wanted {
-                    billing_poll_at = Some(Instant::now() + BILLING_POLL_INTERVAL);
-                }
-            }
-
-            _ = gate_poll => {
-                gate_poll_at = None;
-                let effs = vec![Effect::RefreshGate];
-                if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-                    break;
-                }
-                if !app.has_access() {
-                    gate_poll_at = Some(Instant::now() + GATE_POLL_INTERVAL);
-                }
-            }
-
-            _ = subscription_watch => {
-                subscription_watch_at = None;
-                let effs = app.fire_subscription_check("watch");
-                if process_effects(effs, &mut tasks, &mut app, &progress_tx) {
-                    break;
-                }
             }
 
             _ = roster_poll => {
@@ -2908,7 +2750,6 @@ fn make_run_result(app: &AppView) -> RunResult {
     });
     RunResult {
         exit_info,
-        quit_for_update: app.quit_for_update,
         relaunch: app.relaunch.clone(),
     }
 }
@@ -3060,12 +2901,6 @@ async fn drain_and_process(
                     && crate::clipboard::clipboard_image_probe_supported()
                 {
                     crate::clipboard::prewarm_image_probe();
-                }
-                // The user may have just subscribed in the browser and
-                // tabbed back.
-                let effs = app.fire_subscription_check("focus");
-                if process_effects(effs, tasks, app, progress_tx) {
-                    return true;
                 }
                 // Restore Prompt on refocus: needs-input overlay always, else idle non-vim.
                 match app.active_view {

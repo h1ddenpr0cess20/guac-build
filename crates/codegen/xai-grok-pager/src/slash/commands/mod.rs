@@ -193,7 +193,6 @@ mod tests {
             session_id: None,
             bundle_state: &DEFAULT_BUNDLE_STATE,
             screen_mode: crate::app::ScreenMode::Inline,
-            billing_surface_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot {
                 multiline_mode: false,
                 yolo_mode: false,
@@ -519,7 +518,6 @@ mod tests {
             models: &models,
             cwd: std::path::Path::new("."),
             has_session_announcements: false,
-            billing_surface_visible: true,
             workflows_available: true,
             screen_mode: crate::app::ScreenMode::Fullscreen,
         };
@@ -544,7 +542,6 @@ mod tests {
             models: &models,
             cwd: std::path::Path::new("."),
             has_session_announcements: false,
-            billing_surface_visible: true,
             workflows_available: true,
             screen_mode: crate::app::ScreenMode::Fullscreen,
         };
@@ -586,74 +583,18 @@ mod tests {
             CommandResult::Action(Action::EnterRememberMode)
         ));
     }
-    fn run_usage(args: &str, billing: bool) -> CommandResult {
+    #[test]
+    fn usage_takes_no_arguments() {
         let models = ModelState::default();
         let mut ctx = make_ctx(&models);
-        ctx.billing_surface_visible = billing;
-        usage::UsageCommand.run(&mut ctx, args)
-    }
-    #[test]
-    fn usage_consumer_show_and_manage() {
         assert!(matches!(
-            run_usage("", true),
+            usage::UsageCommand.run(&mut ctx, ""),
             CommandResult::Action(Action::ShowUsage)
         ));
         assert!(matches!(
-            run_usage("show", true),
-            CommandResult::Action(Action::ShowUsage)
-        ));
-        assert!(matches!(
-            run_usage("  manage  ", true),
-            CommandResult::Action(Action::ManageBilling)
-        ));
-        assert!(matches!(run_usage("delete", true), CommandResult::Error(_)));
-    }
-    #[test]
-    fn usage_non_consumer_is_bare_only() {
-        assert!(matches!(
-            run_usage("", false),
-            CommandResult::Action(Action::ShowUsage)
-        ));
-        assert!(matches!(
-            run_usage("manage", false),
+            usage::UsageCommand.run(&mut ctx, "manage"),
             CommandResult::Error(_)
         ));
-        assert!(matches!(run_usage("show", false), CommandResult::Error(_)));
-    }
-    #[test]
-    fn usage_takes_args_only_for_consumer() {
-        let models = ModelState::default();
-        let mut ctx = crate::slash::command::AppCtx {
-            models: &models,
-            cwd: std::path::Path::new("."),
-            has_session_announcements: false,
-            billing_surface_visible: true,
-            workflows_available: true,
-            screen_mode: crate::app::ScreenMode::Fullscreen,
-        };
-        let cmd = usage::UsageCommand;
-        assert!(cmd.takes_args_now(&ctx));
-        ctx.billing_surface_visible = false;
-        assert!(!cmd.takes_args_now(&ctx));
-    }
-    #[test]
-    fn usage_suggest_args_consumer_only() {
-        let models = ModelState::default();
-        let mut ctx = crate::slash::command::AppCtx {
-            models: &models,
-            cwd: std::path::Path::new("."),
-            has_session_announcements: false,
-            billing_surface_visible: true,
-            workflows_available: false,
-            screen_mode: crate::app::ScreenMode::Fullscreen,
-        };
-        let items = usage::UsageCommand.suggest_args(&ctx, "").unwrap();
-        assert_eq!(
-            items.iter().map(|i| i.display.as_str()).collect::<Vec<_>>(),
-            ["show", "manage"]
-        );
-        ctx.billing_surface_visible = false;
-        assert!(usage::UsageCommand.suggest_args(&ctx, "").is_none());
     }
     #[test]
     fn usage_registered_in_builtin_commands() {
@@ -709,7 +650,6 @@ mod tests {
             models: &models,
             cwd: std::path::Path::new("."),
             has_session_announcements: false,
-            billing_surface_visible: true,
             workflows_available: true,
             screen_mode: crate::app::ScreenMode::Fullscreen,
         };

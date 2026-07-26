@@ -244,7 +244,7 @@ pub fn process_client_identifier() -> String {
 /// Header telling cli-chat-proxy whether this process is a single-prompt
 /// (`grok -p`) run or an interactive session; feeds the `client_mode`
 /// metric label.
-pub const CLIENT_MODE_HEADER: &str = "x-grok-client-mode";
+pub const CLIENT_MODE_HEADER: &str = "x-guac-client-mode";
 
 /// One-way latch: set to `"headless"` at startup by the non-TUI entry points
 /// (`run_single_turn` for `grok -p`, `run_headless_inner` for
