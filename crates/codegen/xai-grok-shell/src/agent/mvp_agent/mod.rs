@@ -1149,14 +1149,13 @@ impl AuthRequestMeta {
 /// of remembering which headers the proxy expects.
 ///
 /// Headers injected:
-///  - `x-grok-client-version` -- required by the proxy's version-gate check.
-///    Uses `client_version` when provided, otherwise falls back to cli-chat-proxy
-///    compile-time `CARGO_PKG_VERSION`.
-///  - `X-XAI-Token-Auth` / `x-authenticateresponse` -- required by the
-///    cli-chat-proxy auth middleware when the `base_url` is a known proxy URL.
-///  - optional extra access header -- only set when the corresponding key is
-///    `Some` *and* the `base_url` points at a matching non-production host
-///    (requires the optional non-production feature).
+///  - `x-guac-client-version` -- build version. Uses `client_version` when
+///    provided, otherwise the compile-time `CARGO_PKG_VERSION`.
+///  - `x-guac-client-identifier` -- which surface issued the request.
+///  - client-mode header -- first-party bases only.
+///
+/// The vendor-proprietary `X-XAI-Token-Auth` / `x-authenticateresponse` pair
+/// upstream required is gone along with the CLI proxy that consumed it.
 ///
 /// Existing entries are never overwritten so callers can pre-set a value.
 fn inject_proxy_headers(
@@ -1166,22 +1165,16 @@ fn inject_proxy_headers(
     base_url: &str,
 ) {
     headers
-        .entry("x-grok-client-version".to_string())
+        .entry("x-guac-client-version".to_string())
         .or_insert_with(|| {
             client_version
                 .map(String::from)
                 .unwrap_or_else(|| xai_grok_version::VERSION.to_string())
         });
     headers
-        .entry("x-grok-client-identifier".to_string())
+        .entry("x-guac-client-identifier".to_string())
         .or_insert_with(crate::http::process_client_identifier);
-    if crate::util::is_cli_chat_proxy_url(base_url) {
-        headers
-            .entry("X-XAI-Token-Auth".to_string())
-            .or_insert_with(|| "xai-grok-cli".to_string());
-        headers
-            .entry("x-authenticateresponse".to_string())
-            .or_insert_with(|| "authenticate-response".to_string());
+    if crate::util::serves_first_party_api_extensions(base_url) {
         headers
             .entry(crate::http::CLIENT_MODE_HEADER.to_string())
             .or_insert_with(|| crate::http::process_client_mode().to_string());

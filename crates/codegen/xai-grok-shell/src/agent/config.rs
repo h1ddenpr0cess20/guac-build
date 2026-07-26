@@ -47,13 +47,10 @@ pub fn default_agent_type() -> String {
 }
 /// Default base URL for the OpenAI-compatible Meta Model API.
 ///
-/// The legacy constant names are retained internally to keep this downstream
-/// fork's patch focused and make future upstream rebases tractable.
-pub const CLI_CHAT_PROXY_BASE_URL_DEFAULT: &str = "https://api.meta.ai/v1";
-/// Default inference base URL for Guac Build.
-pub const XAI_API_BASE_URL_DEFAULT: &str = "https://api.meta.ai/v1";
-/// Default base URL for the asset server (profile images, etc.).
-pub const ASSET_SERVER_URL_DEFAULT: &str = "https://assets.grok.com";
+/// Re-exported from the [`xai_grok_env`] leaf crate rather than spelled out
+/// again: the trust predicates in `util` derive their host from the same
+/// constant, and a second literal here is what let the two drift apart.
+pub const API_BASE_URL_DEFAULT: &str = crate::env::PROD_API_BASE_URL;
 /// One or more environment variable names that may hold a model API key.
 ///
 /// Serde `untagged`: accepts a string or an array in TOML/JSON.
@@ -242,19 +239,12 @@ pub struct EndpointsConfig {
     /// Env: `OTEL_EXPORTER_OTLP_TIMEOUT`. Export HTTP timeout (ms).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub otel_exporter_otlp_timeout: Option<u64>,
-    /// Base URL for the asset server (profile images, etc.).
-    /// Env: `GROK_ASSET_SERVER_URL`.
-    #[serde(default = "default_asset_server_url")]
-    pub asset_server_url: String,
     /// Read by `load_management_api_key_sync()`. Declared for `serde_ignored`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub management_api_key: Option<String>,
     /// Read by `load_gcs_service_account_key_sync()`. Declared for `serde_ignored`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gcs_service_account_key: Option<String>,
-}
-pub(crate) fn default_asset_server_url() -> String {
-    std::env::var("GROK_ASSET_SERVER_URL").unwrap_or_else(|_| ASSET_SERVER_URL_DEFAULT.to_owned())
 }
 /// A blank or whitespace-only override counts as unset. Single source of truth
 /// for the "empty value = not configured" rule shared by the endpoint resolvers.
@@ -306,13 +296,13 @@ impl EndpointsConfig {
         resolved.external_otel_master_switch = external_otel_master_switch;
         resolved
     }
-    /// The cli-chat-proxy base URL through which all auxiliary services (and
-    /// OAuth/session inference) resolve: explicit `cli_chat_proxy_base_url`, else
-    /// the public default. NEVER falls back to `xai_api_base_url` — that is the
-    /// inference endpoint (API-key auth) only.
+    /// The first-party API base URL through which inference and every auxiliary
+    /// service resolve: explicit `cli_chat_proxy_base_url`, else the compiled
+    /// default. Upstream pointed this at a separate vendor-operated CLI proxy;
+    /// this fork has one endpoint, so it and `xai_api_base_url` share a default.
     pub fn proxy_url(&self) -> String {
         blank_as_unset(&self.cli_chat_proxy_base_url)
-            .unwrap_or_else(|| CLI_CHAT_PROXY_BASE_URL_DEFAULT.to_owned())
+            .unwrap_or_else(|| API_BASE_URL_DEFAULT.to_owned())
     }
     pub fn resolve_inference_base_url(&self) -> String {
         self.models_base_url
@@ -534,7 +524,7 @@ impl Default for EndpointsConfig {
         Self {
             cli_chat_proxy_base_url: std::env::var("GROK_CLI_CHAT_PROXY_BASE_URL").ok(),
             xai_api_base_url: std::env::var("GROK_XAI_API_BASE_URL")
-                .unwrap_or_else(|_| XAI_API_BASE_URL_DEFAULT.to_owned()),
+                .unwrap_or_else(|_| API_BASE_URL_DEFAULT.to_owned()),
             alpha_test_key: None,
             models_base_url: env_string("GROK_MODELS_BASE_URL"),
             models_list_url: env_string("GROK_MODELS_LIST_URL"),
@@ -559,7 +549,6 @@ impl Default for EndpointsConfig {
                 .and_then(|s| s.parse().ok()),
             otel_exporter_otlp_timeout: env_string("OTEL_EXPORTER_OTLP_TIMEOUT")
                 .and_then(|s| s.parse().ok()),
-            asset_server_url: default_asset_server_url(),
             management_api_key: None,
             gcs_service_account_key: None,
         }
@@ -3331,11 +3320,11 @@ pub fn resolve_model_list(
         });
         let effective = with_provider.as_ref().unwrap_or(model_override);
         let mut entry = effective.apply(key, base, &cfg.endpoints);
-        let session_bearer_unsafe = !crate::util::is_xai_api_bearer_url(&entry.info.base_url)
+        let session_bearer_unsafe = !crate::util::is_first_party_bearer_url(&entry.info.base_url)
             || entry
                 .api_base_url
                 .as_deref()
-                .is_some_and(|url| !crate::util::is_xai_api_bearer_url(url));
+                .is_some_and(|url| !crate::util::is_first_party_bearer_url(url));
         if let Some(pid) = model_override.model_provider.as_deref()
             && entry.auth_provider.is_none()
             && session_bearer_unsafe
@@ -3924,7 +3913,7 @@ pub struct ModelInfo {
     pub id: Option<String>,
     /// The routing slug sent in API requests.
     pub model: String,
-    /// The base URL of the model (session endpoint). e.g. "https://cli-chat-proxy.grok.com/v1"
+    /// The base URL of the model (session endpoint). e.g. "https://api.meta.ai/v1"
     pub base_url: String,
     /// Human-readable name of the model. Honored by both the picker
     /// (`/model`) and `/session-info` -- when set, that's the label shown
@@ -4595,7 +4584,7 @@ pub fn enforce_disable_api_key_auth(
 ) {
     if disable_api_key_auth
         && creds.auth_type == xai_chat_state::AuthType::ApiKey
-        && crate::util::is_xai_api_url(&creds.base_url)
+        && crate::util::is_first_party_api_url(&creds.base_url)
     {
         creds.auth_type = xai_chat_state::AuthType::SessionToken;
         creds.api_key = session_key.map(str::to_owned);
@@ -4832,7 +4821,7 @@ pub fn stamp_session_local_sampler_fields(
 ) {
     cfg.client_identifier = client_identifier;
     cfg.attribution_callback = active_session_config.attribution_callback.clone();
-    if crate::util::is_xai_api_bearer_url(&cfg.base_url) {
+    if crate::util::is_first_party_bearer_url(&cfg.base_url) {
         cfg.bearer_resolver = active_session_config.bearer_resolver.clone();
     }
     cfg.max_retries = max_retries;
@@ -4939,11 +4928,10 @@ pub fn sampling_config_for_model(
 /// URL-derived header logic at the shell boundary so callers downstream see a
 /// single homogenous header bag.
 ///
-/// * cli-chat-proxy bases get `X-XAI-Token-Auth` and
-///   `x-authenticateresponse` headers (mirrors the inline match in the legacy
-///   `sampling::Client::new` on `is_cli_chat_proxy_url`).
-/// * With the optional non-production feature, matching first-party hosts may
-///   get an extra access header from the corresponding key argument.
+/// First-party bases get the client-mode header. The vendor-proprietary
+/// `X-XAI-Token-Auth` / `x-authenticateresponse` pair that upstream sent to its
+/// CLI proxy is gone: this fork speaks plain OpenAI wire format, where those
+/// headers are at best ignored and at worst a fingerprint.
 ///
 /// Existing entries are never overwritten so callers can pre-set a value.
 pub fn inject_url_derived_headers(
@@ -4951,13 +4939,7 @@ pub fn inject_url_derived_headers(
     alpha_test_key: Option<&str>,
     base_url: &str,
 ) {
-    if crate::util::is_cli_chat_proxy_url(base_url) {
-        headers
-            .entry("X-XAI-Token-Auth".to_string())
-            .or_insert_with(|| "xai-grok-cli".to_string());
-        headers
-            .entry("x-authenticateresponse".to_string())
-            .or_insert_with(|| "authenticate-response".to_string());
+    if crate::util::serves_first_party_api_extensions(base_url) {
         headers
             .entry(crate::http::CLIENT_MODE_HEADER.to_string())
             .or_insert_with(|| crate::http::process_client_mode().to_string());
@@ -5364,46 +5346,48 @@ reasoning_effort = "low"
         }
     }
     #[test]
-    fn inject_url_derived_headers_adds_proxy_headers_for_cli_chat_proxy_url() {
+    fn inject_url_derived_headers_adds_client_mode_for_first_party_url() {
         let mut headers = IndexMap::new();
-        inject_url_derived_headers(&mut headers, None, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL);
+        inject_url_derived_headers(&mut headers, None, crate::env::PROD_API_BASE_URL);
         assert_eq!(
-            headers.get("X-XAI-Token-Auth").map(String::as_str),
-            Some("xai-grok-cli")
+            headers
+                .get(crate::http::CLIENT_MODE_HEADER)
+                .map(String::as_str),
+            Some(crate::http::process_client_mode())
         );
-        assert_eq!(
-            headers.get("x-authenticateresponse").map(String::as_str),
-            Some("authenticate-response")
-        );
-    }
-    #[test]
-    fn inject_url_derived_headers_skips_proxy_headers_for_external_url() {
-        let mut headers = IndexMap::new();
-        inject_url_derived_headers(&mut headers, None, "https://api.x.ai/v1");
+        // The vendor-proprietary proxy pair must never come back.
         assert!(headers.get("X-XAI-Token-Auth").is_none());
         assert!(headers.get("x-authenticateresponse").is_none());
+    }
+    #[test]
+    fn inject_url_derived_headers_skips_client_mode_for_third_party_url() {
+        let mut headers = IndexMap::new();
+        inject_url_derived_headers(&mut headers, None, "https://api.openai.com/v1");
+        assert!(headers.get(crate::http::CLIENT_MODE_HEADER).is_none());
     }
     #[test]
     fn inject_url_derived_headers_preserves_caller_extra_headers() {
         let mut headers = IndexMap::new();
         headers.insert("x-custom-byok".to_string(), "value".to_string());
-        inject_url_derived_headers(&mut headers, None, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL);
+        inject_url_derived_headers(&mut headers, None, crate::env::PROD_API_BASE_URL);
         assert_eq!(
             headers.get("x-custom-byok").map(String::as_str),
             Some("value")
         );
-        assert_eq!(
-            headers.get("X-XAI-Token-Auth").map(String::as_str),
-            Some("xai-grok-cli")
-        );
+        assert!(headers.contains_key(crate::http::CLIENT_MODE_HEADER));
     }
     #[test]
     fn inject_url_derived_headers_does_not_overwrite_existing_entries() {
         let mut headers = IndexMap::new();
-        headers.insert("X-XAI-Token-Auth".to_string(), "caller-set".to_string());
-        inject_url_derived_headers(&mut headers, None, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL);
+        headers.insert(
+            crate::http::CLIENT_MODE_HEADER.to_string(),
+            "caller-set".to_string(),
+        );
+        inject_url_derived_headers(&mut headers, None, crate::env::PROD_API_BASE_URL);
         assert_eq!(
-            headers.get("X-XAI-Token-Auth").map(String::as_str),
+            headers
+                .get(crate::http::CLIENT_MODE_HEADER)
+                .map(String::as_str),
             Some("caller-set"),
         );
     }
@@ -5900,7 +5884,7 @@ reasoning_effort = "low"
             "ws-model".to_string(),
             test_model_entry(
                 "ws-model",
-                "https://api.x.ai/v1",
+                "https://api.meta.ai/v1",
                 Some("first-party-key"),
                 None,
                 None,
@@ -6289,7 +6273,7 @@ reasoning_effort = "low"
             assert_eq!(
                 session_creds.base_url,
                 endpoints.proxy_url(),
-                "{model_id}: SessionToken must route to cli-chat-proxy"
+                "{model_id}: SessionToken must route to the first-party API"
             );
             let api_key_creds = ResolvedCredentials {
                 api_key: Some("key".into()),
@@ -6302,7 +6286,7 @@ reasoning_effort = "low"
             };
             assert_eq!(
                 api_key_creds.base_url, endpoints.xai_api_base_url,
-                "{model_id}: ExternalApiKey must route to api.x.ai"
+                "{model_id}: ExternalApiKey must route to the configured inference endpoint"
             );
         }
     }
@@ -6541,13 +6525,8 @@ reasoning_effort = "low"
     }
     #[test]
     fn proxy_messages_models_use_bearer_auth_scheme() {
-        let mut model = test_model_entry(
-            "grok-4.5",
-            crate::env::PROD_CLI_CHAT_PROXY_BASE_URL,
-            None,
-            None,
-            None,
-        );
+        let mut model =
+            test_model_entry("grok-4.5", crate::env::PROD_API_BASE_URL, None, None, None);
         model.info.api_backend = ApiBackend::Messages;
         let config = sampling_config_for_model(
             &model,
@@ -6560,13 +6539,12 @@ reasoning_effort = "low"
         assert_eq!(config.api_backend, ApiBackend::Messages);
         assert_eq!(config.auth_scheme, AuthScheme::Bearer);
         assert_eq!(config.api_key, Some("tok".to_string()));
-        assert_eq!(config.base_url, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL);
-        assert_eq!(
+        assert_eq!(config.base_url, crate::env::PROD_API_BASE_URL);
+        assert!(
             config
                 .extra_headers
-                .get("X-XAI-Token-Auth")
-                .map(String::as_str),
-            Some("xai-grok-cli")
+                .contains_key(crate::http::CLIENT_MODE_HEADER),
+            "a first-party base URL still gets the client-mode header"
         );
     }
     /// Regression: without a session key, `resolve_credentials` falls through
@@ -6590,15 +6568,15 @@ reasoning_effort = "low"
     #[test]
     fn enforce_disable_api_key_auth_blocks_first_party_only() {
         use xai_chat_state::AuthType;
-        let mut creds = api_key_creds("https://api.x.ai/v1");
+        let mut creds = api_key_creds("https://api.meta.ai/v1");
         enforce_disable_api_key_auth(&mut creds, false, Some("session-jwt"));
         assert_eq!(creds.auth_type, AuthType::ApiKey);
         assert_eq!(creds.api_key.as_deref(), Some("xai-secret"));
-        let mut creds = api_key_creds("https://api.x.ai/v1");
+        let mut creds = api_key_creds("https://api.meta.ai/v1");
         enforce_disable_api_key_auth(&mut creds, true, Some("session-jwt"));
         assert_eq!(creds.auth_type, AuthType::SessionToken);
         assert_eq!(creds.api_key.as_deref(), Some("session-jwt"));
-        let mut creds = api_key_creds("https://api.x.ai/v1");
+        let mut creds = api_key_creds("https://api.meta.ai/v1");
         enforce_disable_api_key_auth(&mut creds, true, None);
         assert_eq!(creds.auth_type, AuthType::SessionToken);
         assert_eq!(creds.api_key, None);
@@ -6608,7 +6586,7 @@ reasoning_effort = "low"
         assert_eq!(creds.api_key.as_deref(), Some("xai-secret"));
         let mut creds = ResolvedCredentials {
             auth_type: AuthType::SessionToken,
-            ..api_key_creds("https://api.x.ai/v1")
+            ..api_key_creds("https://api.meta.ai/v1")
         };
         enforce_disable_api_key_auth(&mut creds, true, Some("session-jwt"));
         assert_eq!(creds.auth_type, AuthType::SessionToken);
@@ -6617,15 +6595,15 @@ reasoning_effort = "low"
     /// with its own api_key resolves to `ApiKey` (priority 1, beating the
     /// session), and the kill switch — now applied inside
     /// `try_resolve_model_credentials` — swaps it for the session token. BYOK
-    /// (non-x.ai) own keys are preserved. (`try_resolve_model_credentials`
+    /// (third-party) own keys are preserved. (`try_resolve_model_credentials`
     /// loads global config, so this exercises its resolve + enforce core.)
     #[test]
     fn try_resolve_model_credentials_swaps_first_party_own_key_under_kill_switch() {
         use xai_chat_state::AuthType;
         let entry = test_model_entry(
             "m",
-            "https://api.x.ai/v1",
-            Some("xai-model-key"),
+            "https://api.meta.ai/v1",
+            Some("first-party-model-key"),
             None,
             None,
         );
@@ -6635,7 +6613,7 @@ reasoning_effort = "low"
             AuthType::ApiKey,
             "own key wins over session"
         );
-        assert_eq!(creds.api_key.as_deref(), Some("xai-model-key"));
+        assert_eq!(creds.api_key.as_deref(), Some("first-party-model-key"));
         enforce_disable_api_key_auth(&mut creds, true, Some("session-jwt"));
         assert_eq!(
             creds.auth_type,
@@ -8112,7 +8090,10 @@ reasoning_effort = "low"
         let model = models.get(dm).expect("model should exist");
         assert_eq!(model.info.base_url, "https://my-proxy.example.com/v1");
         assert_eq!(model.api_key.as_deref(), Some("my-custom-api-key"));
-        assert!(model.env_key.is_none());
+        // The default catalog declares `env_key` for the first-party model, and
+        // a user override merges over that entry rather than replacing it — so
+        // the names survive here. What matters is precedence: an explicit
+        // `api_key` outranks any env-var lookup, asserted just below.
         let sampling = resolve_sampling(model, Some("session-token"));
         assert_eq!(
             sampling.api_key.as_deref(),
@@ -8213,7 +8194,7 @@ reasoning_effort = "low"
         let mut prefetched = IndexMap::new();
         prefetched.insert(
             dm.to_string(),
-            test_model_entry(dm, "https://cli-chat-proxy.grok.com/v1", None, None, None),
+            test_model_entry(dm, "https://api.meta.ai/v1", None, None, None),
         );
         let (_, models) = resolve_models_from_toml(
             &format!(
@@ -8371,7 +8352,7 @@ reasoning_effort = "low"
             "default-grok".to_string(),
             test_model_entry(
                 crate::models::default_model(),
-                "https://cli-chat-proxy.grok.com/v1",
+                "https://api.meta.ai/v1",
                 None,
                 None,
                 Some("https://api.x.ai/v1"),
@@ -8497,7 +8478,7 @@ reasoning_effort = "low"
             cli_chat_proxy_base_url: None,
             ..Default::default()
         };
-        let proxy = CLI_CHAT_PROXY_BASE_URL_DEFAULT;
+        let proxy = API_BASE_URL_DEFAULT;
         assert_eq!(cfg.proxy_url(), proxy);
         assert_eq!(cfg.resolve_inference_base_url(), proxy);
         assert_eq!(cfg.resolve_models_list_url(), format!("{proxy}/models"));
@@ -8561,7 +8542,7 @@ reasoning_effort = "low"
         assert!(cfg.endpoints.cli_chat_proxy_base_url.is_none());
         assert_eq!(
             cfg.endpoints.resolve_managed_config_url(),
-            format!("{CLI_CHAT_PROXY_BASE_URL_DEFAULT}/deployment/config")
+            format!("{API_BASE_URL_DEFAULT}/deployment/config")
         );
         assert!(
             !cfg.endpoints

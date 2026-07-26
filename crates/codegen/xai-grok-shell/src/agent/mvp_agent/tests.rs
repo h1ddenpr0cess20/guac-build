@@ -2939,13 +2939,12 @@ async fn remove_session_releases_workspace_binding_and_side_maps() {
     assert!(!agent.session_turn_numbers.borrow().contains_key(&sid));
     assert!(!agent.permission_event_receivers.borrow().contains_key(&sid));
 }
-/// Without a bridge, `ext_method` falls through to the unchanged local
-/// dispatch (`rewind::handle`), which reports the missing session — proving
-/// the routing hook is skipped in local mode.
+/// `ext_method` dispatches locally (`rewind::handle`), which reports the
+/// missing session. This build has no remote bridge at all, so local dispatch
+/// is the only path.
 #[test]
 fn ext_method_rewind_uses_local_dispatch_without_bridge() {
     use acp::Agent as _;
-    let _env = crate::env::EnvVarGuard::remove(crate::env::GROK_DISABLE_CUSTOM_BRIDGE_ENV);
     run_local_for_bridge_test(|| async {
         let agent = build_minimal_agent_for_tests();
         let params = serde_json::json!({ "sessionId": "sess-local" });

@@ -35,61 +35,29 @@ pub fn random_f64() -> f64 {
 pub fn probabilistic_sample(rate: f64) -> bool {
     random_f64() < rate
 }
-fn matches_trusted_base_url(candidate: &str, trusted_base: &str) -> bool {
-    let Ok(candidate) = reqwest::Url::parse(candidate) else {
-        return false;
-    };
-    let Ok(trusted) = reqwest::Url::parse(trusted_base) else {
-        return false;
-    };
-    let trusted_path = trusted.path();
-    let candidate_path = candidate.path();
-    let path_matches = candidate_path == trusted_path
-        || candidate_path
-            .strip_prefix(trusted_path)
-            .is_some_and(|suffix| suffix.starts_with('/'));
-    candidate.scheme() == trusted.scheme()
-        && candidate.host_str() == trusted.host_str()
-        && candidate.port_or_known_default() == trusted.port_or_known_default()
-        && path_matches
-}
-/// True for cli-chat-proxy URLs (production, plus local-dev hosts when the
-/// optional non-production feature is enabled). When that feature is on,
-/// runtime env overrides can extend this trust set. Loopback is always
-/// accepted (unit tests and local mock servers on arbitrary ports).
-pub fn is_cli_chat_proxy_url(url: &str) -> bool {
-    if matches_trusted_base_url(url, crate::env::PROD_CLI_CHAT_PROXY_BASE_URL) {
-        return true;
-    }
-    if let Ok(u) = reqwest::Url::parse(url)
-        && let Some(h) = u.host_str()
-        && (h == "localhost" || h == "127.0.0.1" || h == "::1")
-    {
-        return true;
-    }
-    false
-}
-/// True for xAI-operated endpoints (`*.x.ai`, cli-chat-proxy, and optional
-/// non-production xAI hosts when that feature is enabled).
-/// `disable_api_key_auth` refuses keys only for these; other hosts are BYOK and
-/// exempt. Safe against invalid URLs and suffix attacks (`evil-x.ai.example`).
+/// True for the first-party inference API ([`crate::env::FIRST_PARTY_API_HOST`]
+/// and its subdomains).
+///
+/// `disable_api_key_auth` refuses keys only for these; every other host is BYOK
+/// and exempt. Safe against invalid URLs and suffix attacks
+/// (`evil-api.meta.ai.example`, `prefixmeta.ai`).
 ///
 /// Scheme-agnostic so credential *refusal* fails closed. To decide where to
-/// *attach* a credential, use [`is_xai_api_bearer_url`].
-pub fn is_xai_api_url(url: &str) -> bool {
-    is_xai_api_url_impl(url, false)
+/// *attach* a credential, use [`is_first_party_bearer_url`].
+pub fn is_first_party_api_url(url: &str) -> bool {
+    is_first_party_api_url_impl(url, false)
 }
-/// Like [`is_xai_api_url`], but requires `https` on every arm, so a
+/// Like [`is_first_party_api_url`], but requires `https` on every arm, so a
 /// session bearer is never attached to a cleartext endpoint, including loopback
 /// (a co-located process could otherwise read a token sent to `http://localhost`).
-pub fn is_xai_api_bearer_url(url: &str) -> bool {
-    is_xai_api_url_impl(url, true)
+pub fn is_first_party_bearer_url(url: &str) -> bool {
+    is_first_party_api_url_impl(url, true)
 }
-fn is_xai_api_url_impl(url: &str, require_https: bool) -> bool {
+fn is_first_party_api_url_impl(url: &str, require_https: bool) -> bool {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return false;
+    };
     if require_https {
-        let Ok(parsed) = reqwest::Url::parse(url) else {
-            return false;
-        };
         if parsed.scheme() != "https" {
             return false;
         }
@@ -97,13 +65,27 @@ fn is_xai_api_url_impl(url: &str, require_https: bool) -> bool {
             return false;
         }
     }
-    if is_cli_chat_proxy_url(url) {
+    let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
+    let apex = crate::env::FIRST_PARTY_API_HOST;
+    // Match the apex exactly, or a subdomain of it. The leading dot is what
+    // stops `evil-api.meta.ai.example` and `prefixapi.meta.ai` from matching.
+    host == apex || host.ends_with(&format!(".{apex}"))
+}
+/// True when the endpoint can be expected to serve the first-party API
+/// *extensions* — `/models-v2` metadata, `/settings` — on top of plain
+/// OpenAI-compatible chat: the first-party host, or any loopback address.
+///
+/// Loopback counts because a local mock server (the idle-resume tests) or a
+/// user-run reverse proxy in front of the real API is still that API. This is
+/// deliberately **not** the predicate for credential decisions: attaching a
+/// bearer to loopback would leak it to any co-located process, and refusing an
+/// API key on loopback would break LM Studio and Ollama. Use
+/// [`is_first_party_bearer_url`] and [`is_first_party_api_url`] for those.
+pub fn serves_first_party_api_extensions(url: &str) -> bool {
+    if is_first_party_api_url(url) {
         return true;
     }
-    reqwest::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(str::to_owned))
-        .is_some_and(|host| host == "x.ai" || host.ends_with(".x.ai"))
+    reqwest::Url::parse(url).is_ok_and(|u| is_loopback_host(&u))
 }
 fn is_loopback_host(parsed: &reqwest::Url) -> bool {
     match parsed.host() {
@@ -255,61 +237,91 @@ pub fn is_grok_process(pid: u32) -> bool {
 mod tests {
     use super::*;
     #[test]
-    fn test_is_cli_chat_proxy_url_accepts_proxy_subpath() {
-        assert!(is_cli_chat_proxy_url(
-            "https://cli-chat-proxy.grok.com/v1/chat/completions"
+    fn test_is_first_party_api_url() {
+        assert!(is_first_party_api_url("https://api.meta.ai/v1"));
+        assert!(is_first_party_api_url(
+            "https://api.meta.ai/v1/chat/completions"
         ));
-    }
-    #[test]
-    fn test_is_cli_chat_proxy_url_rejects_public_api() {
-        assert!(!is_cli_chat_proxy_url("https://api.x.ai/v1"));
-    }
-    #[test]
-    fn test_is_cli_chat_proxy_url_rejects_spoofed_hostname() {
-        assert!(!is_cli_chat_proxy_url(
-            "https://cli-chat-proxy.grok.com.evil.example/v1"
+        // A path outside the compiled `/v1` prefix is still the same operator.
+        assert!(is_first_party_api_url("https://api.meta.ai/"));
+        assert!(!is_first_party_api_url("https://api.openai.com/v1"));
+        assert!(!is_first_party_api_url("https://api.anthropic.com/v1"));
+        assert!(!is_first_party_api_url(
+            "https://generativelanguage.googleapis.com"
         ));
-    }
-    #[test]
-    fn test_is_cli_chat_proxy_url_rejects_v11_prefix_confusion() {
-        assert!(!is_cli_chat_proxy_url(
-            "https://cli-chat-proxy.grok.com/v11/chat/completions"
+        // Suffix-confusion attacks.
+        assert!(!is_first_party_api_url(
+            "https://api.meta.ai.evil.example/v1"
         ));
-    }
-    #[test]
-    fn test_is_xai_api_url() {
-        assert!(is_xai_api_url("https://api.x.ai/v1"));
-        assert!(is_xai_api_url("https://api.x.ai/v1/chat/completions"));
-        assert!(is_xai_api_url("https://x.ai"));
-        assert!(is_xai_api_url(
-            "https://cli-chat-proxy.grok.com/v1/chat/completions"
+        assert!(!is_first_party_api_url(
+            "https://evil-api.meta.ai.attacker.com/v1"
         ));
-        assert!(!is_xai_api_url("https://api.openai.com/v1"));
-        assert!(!is_xai_api_url("https://api.anthropic.com/v1"));
-        assert!(!is_xai_api_url("https://generativelanguage.googleapis.com"));
-        assert!(!is_xai_api_url("https://api.x.ai.evil.example/v1"));
-        assert!(!is_xai_api_url("https://evil-x.ai.attacker.com/v1"));
-        assert!(!is_xai_api_url("https://prefixx.ai/v1"));
-        assert!(!is_xai_api_url("not-a-url"));
-        assert!(!is_xai_api_url(""));
-        assert!(is_xai_api_url("http://api.x.ai/v1"));
-        assert!(is_xai_api_url("http://localhost:11434/v1"));
+        assert!(!is_first_party_api_url("https://prefixapi.meta.ai/v1"));
+        assert!(!is_first_party_api_url("not-a-url"));
+        assert!(!is_first_party_api_url(""));
+        // Scheme-agnostic, so credential *refusal* fails closed.
+        assert!(is_first_party_api_url("http://api.meta.ai/v1"));
+        // A local model server is the user's own machine, not first-party: the
+        // `disable_api_key_auth` kill switch must not strip an LM Studio or
+        // Ollama key.
+        assert!(!is_first_party_api_url("http://localhost:11434/v1"));
     }
     #[test]
-    fn test_is_xai_api_bearer_url() {
-        assert!(is_xai_api_bearer_url("https://api.x.ai/v1"));
-        assert!(!is_xai_api_bearer_url("http://api.x.ai/v1"));
-        assert!(!is_xai_api_bearer_url("http://localhost:11434/v1"));
+    fn test_is_first_party_bearer_url() {
+        assert!(is_first_party_bearer_url("https://api.meta.ai/v1"));
+        assert!(!is_first_party_bearer_url("http://api.meta.ai/v1"));
+        assert!(!is_first_party_bearer_url("http://localhost:11434/v1"));
         {
-            assert!(!is_xai_api_bearer_url("https://localhost:11434/v1"));
-            assert!(!is_xai_api_bearer_url("https://127.0.0.2:11434/v1"));
-            assert!(!is_xai_api_bearer_url("https://[::1]:11434/v1"));
+            assert!(!is_first_party_bearer_url("https://localhost:11434/v1"));
+            assert!(!is_first_party_bearer_url("https://127.0.0.2:11434/v1"));
+            assert!(!is_first_party_bearer_url("https://[::1]:11434/v1"));
         }
-        assert!(is_xai_api_bearer_url("https://API.X.AI/v1"));
-        assert!(!is_xai_api_bearer_url(
-            "https://api.x.ai@attacker.example/v1"
+        assert!(is_first_party_bearer_url("https://API.META.AI/v1"));
+        // userinfo trick: the real host is `attacker.example`.
+        assert!(!is_first_party_bearer_url(
+            "https://api.meta.ai@attacker.example/v1"
         ));
-        assert!(!is_xai_api_bearer_url("https://х.ai/v1"));
+        // Cyrillic homoglyph in the apex label.
+        assert!(!is_first_party_bearer_url("https://api.mеta.ai/v1"));
+    }
+    /// Loopback serves the extended surface (local mock servers, a user-run
+    /// reverse proxy) but must never be treated as first-party for credentials.
+    #[test]
+    fn serves_first_party_api_extensions_accepts_loopback_but_credentials_do_not() {
+        for local in [
+            "http://localhost:1234/v1",
+            "http://127.0.0.1:8080/v1",
+            "https://[::1]:9000/v1",
+        ] {
+            assert!(
+                serves_first_party_api_extensions(local),
+                "{local} should serve extensions"
+            );
+            assert!(
+                !is_first_party_bearer_url(local),
+                "{local} must never receive a session bearer"
+            );
+            assert!(
+                !is_first_party_api_url(local),
+                "{local} must stay exempt from the api-key kill switch"
+            );
+        }
+        assert!(serves_first_party_api_extensions(
+            crate::env::PROD_API_BASE_URL
+        ));
+        assert!(!serves_first_party_api_extensions(
+            "https://api.openai.com/v1"
+        ));
+        assert!(!serves_first_party_api_extensions("not-a-url"));
+    }
+    /// The bearer predicate must accept the compiled default, or the fork cannot
+    /// authenticate to its own API. This is the regression the rebrand shipped:
+    /// the default moved to `api.meta.ai` while the trust set still named
+    /// `*.x.ai`, so the session bearer silently stopped being attached.
+    #[test]
+    fn compiled_default_base_url_is_trusted_for_bearer() {
+        assert!(is_first_party_bearer_url(crate::env::PROD_API_BASE_URL));
+        assert!(is_first_party_api_url(crate::env::PROD_API_BASE_URL));
     }
     #[test]
     fn test_truncate() {

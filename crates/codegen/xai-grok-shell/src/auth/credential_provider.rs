@@ -100,7 +100,7 @@ pub(crate) fn embedding_session_credentials(
     });
     xai_grok_memory::EndpointScopedCredentials::for_endpoint(
         embed_base_url,
-        crate::util::is_xai_api_bearer_url,
+        crate::util::is_first_party_bearer_url,
         auth_credentials,
         api_key_provider,
     )
@@ -119,8 +119,8 @@ pub(crate) fn embedding_session_credentials(
 /// - `"grok-extension"` — VS Code / browser extension
 ///
 /// The factory forwards both:
-/// - `x-grok-client-version`   (e.g. "0.1.210-alpha.5 (279ffacddb)")
-/// - `x-grok-client-identifier`
+/// - `x-guac-client-version`   (e.g. "0.1.210-alpha.5 (279ffacddb)")
+/// - `x-guac-client-identifier`
 ///
 /// to the underlying `xai-file-utils::StorageClient` via
 /// `.with_client_identity(...)`. This is what powers the improved error
@@ -396,7 +396,11 @@ mod tests {
         );
         let api_key_provider: xai_grok_tools::types::SharedApiKeyProvider =
             Arc::new(crate::auth::manager::SharedAuthKeyProvider(mgr.clone()));
-        for denied in ["https://byok.attacker.example/v1", "http://api.x.ai/v1"] {
+        for denied in [
+            "https://byok.attacker.example/v1",
+            // Cleartext, so the bearer must not ride along even on our own host.
+            "http://api.meta.ai/v1",
+        ] {
             let resolved =
                 embedding_session_credentials(denied, Some(&mgr), Some(api_key_provider.clone()));
             assert!(
@@ -405,7 +409,7 @@ mod tests {
             );
         }
         let resolved = embedding_session_credentials(
-            "https://api.x.ai/v1",
+            "https://api.meta.ai/v1",
             Some(&mgr),
             Some(api_key_provider),
         );

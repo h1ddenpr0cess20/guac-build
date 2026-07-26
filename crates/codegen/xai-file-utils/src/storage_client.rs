@@ -544,8 +544,8 @@ impl StorageClient {
     /// storage requests (including the high-traffic `batch_upload`).
     ///
     /// These become the headers:
-    ///   - `x-grok-client-version`
-    ///   - `x-grok-client-identifier` (one of "grok-shell", "grok-pager",
+    ///   - `x-guac-client-version`
+    ///   - `x-guac-client-identifier` (one of "grok-shell", "grok-pager",
     ///     "grok-desktop", "grok-extension", "grok-agent-sdk")
     ///
     /// Server-side logs in `cli-chat-proxy` and analytics queries now
@@ -568,7 +568,7 @@ impl StorageClient {
         self
     }
 
-    /// Sets the `x-grok-client-mode` value forwarded to cli-chat-proxy
+    /// Sets the `x-guac-client-mode` value forwarded to cli-chat-proxy
     /// (`headless` / `interactive`), for the `client_mode` metric label.
     pub fn with_client_mode(mut self, mode: impl Into<String>) -> Self {
         self.client_mode = Some(mode.into());
@@ -1103,14 +1103,14 @@ impl StorageClient {
             .client_version
             .as_deref()
             .unwrap_or(xai_grok_version::VERSION);
-        let mut builder = builder.header("x-grok-client-version", version);
+        let mut builder = builder.header("x-guac-client-version", version);
 
         if let Some(id) = &self.client_identifier {
-            builder = builder.header("x-grok-client-identifier", id);
+            builder = builder.header("x-guac-client-identifier", id);
         }
 
         if let Some(mode) = &self.client_mode {
-            builder = builder.header("x-grok-client-mode", mode);
+            builder = builder.header("x-guac-client-mode", mode);
         }
 
         for (name, value) in crate::trace_context::trace_context_headers().iter() {
@@ -1978,7 +1978,7 @@ async fn upload_part_streaming(
         let mut request = client
             .post(&url)
             .header("Content-Type", "application/octet-stream")
-            .header("x-grok-client-version", xai_grok_version::VERSION)
+            .header("x-guac-client-version", xai_grok_version::VERSION)
             .header("Content-Length", length.to_string());
         for (name, value) in crate::trace_context::trace_context_headers().iter() {
             request = request.header(name.clone(), value.clone());
